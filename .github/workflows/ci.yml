@@ -20,6 +20,15 @@ jobs:
       - uses: gradle/actions/setup-gradle@v5
       - name: Build and test
         run: ./gradlew build --stacktrace
+      - name: Performance
+        run: ./gradlew perfTest --stacktrace
+      - name: Report performance
+        if: always()
+        run: |
+          if [ -f build/perf/results.txt ]; then
+            while IFS= read -r line; do echo "::notice title=perf::$line"; done < build/perf/results.txt
+            { echo '### Search performance'; echo; sed 's/^/- /' build/perf/results.txt; } >> "$GITHUB_STEP_SUMMARY"
+          fi
       - name: Upload test reports
         if: failure()
         uses: actions/upload-artifact@v4

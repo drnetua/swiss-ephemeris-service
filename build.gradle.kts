@@ -67,13 +67,29 @@ fun JavaForkOptions.useLibswe() {
     jvmArgs("--enable-native-access=ALL-UNNAMED")
 }
 
-tasks.test {
+tasks.withType<Test>().configureEach {
     dependsOn(buildLibswe)
-    useJUnitPlatform()
     useLibswe()
     systemProperty("swe.swetest", nativeDir.get().file("bin/swetest").asFile.absolutePath)
     // On macOS libswe keeps its state process-wide, so test classes must not share a JVM.
     if (System.getProperty("os.name").startsWith("Mac")) forkEvery = 1
+}
+
+tasks.test {
+    useJUnitPlatform { excludeTags("perf") }
+}
+
+// Timing tests, kept out of `check`; results go to build/perf/results.txt.
+tasks.register<Test>("perfTest") {
+    group = "verification"
+    description = "Runs the tests tagged perf and writes their timings to build/perf/results.txt."
+    val testSources = sourceSets["test"]
+    testClassesDirs = testSources.output.classesDirs
+    classpath = testSources.runtimeClasspath
+    useJUnitPlatform { includeTags("perf") }
+    systemProperty("perf.out", layout.buildDirectory.file("perf/results.txt").get().asFile.absolutePath)
+    outputs.upToDateWhen { false }
+    testLogging { showStandardStreams = true }
 }
 
 application {

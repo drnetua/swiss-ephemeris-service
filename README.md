@@ -30,6 +30,7 @@ Needs JDK 25, a C compiler and `curl`. The build fetches the pinned Swiss Epheme
 
 ```bash
 ./gradlew build       # libswe, code generation, tests
+./gradlew perfTest    # timing of crossing searches with and without speed (build/perf/results.txt)
 ./gradlew run         # gRPC on :50051
 grpcurl -plaintext -d '{"instants":["2000-01-01T12:00:00Z"],"bodies":["SUN","MOON"],
   "zodiac":{"sidereal":{"ayanamsa":"LAHIRI"}}}' localhost:50051 me.lagna.ephemeris.v1.Ephemeris/GetPositions
