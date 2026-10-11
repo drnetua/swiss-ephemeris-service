@@ -84,7 +84,10 @@ class SearchStepTest {
     private companion object {
         const val FINE_STEP = 0.1
 
-        /** About 0.9 s: both searches refine the same instants to 1e-6 day. */
-        const val TIME_TOLERANCE = 1e-5
+        /**
+         * About 9 s. Both searches refine to 1e-6 day, but near a station a slow body barely moves (Chiron: about
+         * 1e-10 degrees a second), so bisections over different brackets can settle a second or so apart.
+         */
+        const val TIME_TOLERANCE = 1e-4
     }
 }
