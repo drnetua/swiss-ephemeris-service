@@ -15,7 +15,7 @@ The service computes astronomical positions with the Swiss Ephemeris 2.10.03 and
 
 You need three things: the endpoint, a client generated from the proto, and one test call.
 
-1. **Get the endpoint** from the operator as `<host>:<port>` (the default port is 50051). Inside a private network the service speaks plaintext HTTP/2 (h2c); on a public network it sits behind TLS. The operator tells you which.
+1. **Get the endpoint** of the instance you call, as `<host>:<port>`. The service itself listens on port 50051 with plaintext HTTP/2 (h2c); TLS, proxies and the public address are part of each deployment, not of this API. Drop `-plaintext` from the commands below when your endpoint uses TLS.
 2. **Generate a client** from `ephemeris.proto` with `protoc` or `buf`. The file imports only `google/protobuf/timestamp.proto`, which ships with every protobuf toolchain. Pin the proto to a commit or tag of the repository.
 3. **Make a test call** with [grpcurl](https://github.com/fullstorydev/grpcurl), which needs no proto file thanks to reflection:
 
