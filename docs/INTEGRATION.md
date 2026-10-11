@@ -1,0 +1,197 @@
+# Ephemeris gRPC API — Integration Guide
+
+Last updated: 2026-10-11
+
+## Overview
+
+The service computes astronomical positions with the Swiss Ephemeris 2.10.03 and exposes them over gRPC. Every request carries all of its inputs: there are no accounts, sessions or stored data, so any client in any language can call it and any response can be cached by its request.
+
+- **Contract:** [`ephemeris.proto`](../src/main/proto/me/lagna/ephemeris/v1/ephemeris.proto), package `me.lagna.ephemeris.v1`, service `Ephemeris`, 8 RPCs. The proto file is the source of truth; this guide explains how to use it.
+- **Transport:** gRPC over HTTP/2. Server reflection and the standard gRPC health service are enabled.
+- **What it computes:** positions and speeds of 14 bodies, ayanamsa, house cusps and angles, rise/set/transit times, exact sign or degree crossings and retrograde stations.
+- **What it leaves to you:** converting a local birth time to UTC, turning a place name into coordinates, and any astrological interpretation. The service only takes UTC instants and latitude/longitude.
+
+## Getting started
+
+You need three things: the endpoint, a client generated from the proto, and one test call.
+
+1. **Get the endpoint** from the operator as `<host>:<port>` (the default port is 50051). Inside a private network the service speaks plaintext HTTP/2 (h2c); on a public network it sits behind TLS. The operator tells you which.
+2. **Generate a client** from `ephemeris.proto` with `protoc` or `buf`. The file imports only `google/protobuf/timestamp.proto`, which ships with every protobuf toolchain. Pin the proto to a commit or tag of the repository.
+3. **Make a test call** with [grpcurl](https://github.com/fullstorydev/grpcurl), which needs no proto file thanks to reflection:
+
+```bash
+grpcurl -plaintext <host>:50051 list
+grpcurl -plaintext <host>:50051 me.lagna.ephemeris.v1.Ephemeris/GetInfo
+grpcurl -plaintext -d '{"service": ""}' <host>:50051 grpc.health.v1.Health/Check
+```
+
+`GetInfo` returns the engine version, the supported date range, the per-request limit and the source code URL. The health check returns `SERVING` once the ephemeris files have passed their startup check.
+
+| Stack | Code generation |
+| --- | --- |
+| Go | `protoc-gen-go` + `protoc-gen-go-grpc` |
+| Java / Kotlin | `protoc-gen-grpc-java` (+ `protoc-gen-grpc-kotlin` for coroutine stubs) |
+| Python | `grpcio-tools` |
+| Node.js / TypeScript | `@grpc/grpc-js` with `ts-proto` or `buf` generated stubs |
+| .NET | `Grpc.Tools` |
+| Rust | `tonic-build` |
+| Browser | Not supported directly: gRPC-Web needs a proxy such as Envoy, which the service does not provide |
+
+## Conventions
+
+Most integration bugs come from time zones and sign conventions, so read this section before writing code.
+
+- **Time** is `google.protobuf.Timestamp` in UTC (in JSON: RFC 3339, `"2000-01-01T12:00:00Z"`). The service treats it as UT1; the two differ by under 0.9 s. Convert local civil time to UTC yourself with a time-zone database that holds historical offsets.
+- **Supported range** is 1800-01-02T00:00Z to 2400-01-01T00:00Z, also returned by `GetInfo`. Any instant outside it fails with `OUT_OF_RANGE`.
+- **Geographic coordinates** are degrees with **north and east positive**: Kyiv is latitude 50.45, longitude 30.52; New York is longitude −74.0. Altitude is in metres and optional.
+- **Angles** are degrees. Ecliptic longitudes are in [0, 360). Speeds are degrees per day and are negative while a body is retrograde. Distances are in astronomical units.
+- **Zodiac:** omit `zodiac` (or send `tropical`) for tropical longitudes; send `sidereal` with an `ayanamsa` for sidereal ones. Every longitude in a request and its response uses the same zodiac.
+- **Positions** are geocentric and apparent; pass `observer` to `GetPositions` for topocentric ones.
+- **Batches keep their order:** results come back in the order of the request's instants, bodies or queries; `GetPositions` results also repeat their instant and body.
+- **Enums:** every `*_UNSPECIFIED` value (0) is rejected with `INVALID_ARGUMENT`, except `DiscConvention`, whose default is described under `GetRiseSet`. Treat enum values you do not know as possible: the contract may add some.
+- **Absent fields mean "none":** a `RiseSetTime` without `instant` means the event does not happen that day (polar day or night).
+
+| Enum | Values |
+| --- | --- |
+| `Body` | `SUN`, `MOON`, `MERCURY`, `VENUS`, `MARS`, `JUPITER`, `SATURN`, `URANUS`, `NEPTUNE`, `PLUTO`, `MEAN_NODE`, `TRUE_NODE`, `MEAN_APOGEE`, `CHIRON` |
+| `Ayanamsa` | `LAHIRI`, `RAMAN`, `KRISHNAMURTI`, `FAGAN_BRADLEY`, `YUKTESHWAR`, `TRUE_CHITRAPAKSHA`, `TRUE_REVATI`, `TRUE_PUSHYA` |
+| `HouseSystem` | `WHOLE_SIGN`, `EQUAL`, `PLACIDUS`, `SRIPATI`, `KOCH`, `PORPHYRY`, `REGIOMONTANUS`, `CAMPANUS` |
+| `RiseSetEvent` | `RISE`, `SET`, `UPPER_TRANSIT`, `LOWER_TRANSIT` |
+| `DiscConvention` | `UPPER_LIMB_REFRACTED` (default), `CENTRE_NO_REFRACTION`, `CENTRE_REFRACTED` |
+
+## RPC reference
+
+All RPCs are unary except `StreamPositions`, and all are idempotent. Examples are grpcurl JSON (lowerCamel field names, enum names as strings); the same fields exist in every generated client.
+
+| RPC | Use it for | Cached by the server |
+| --- | --- | --- |
+| `GetPositions` | Positions of several bodies at several instants | No |
+| `StreamPositions` | Positions at a fixed step over a range (ephemeris tables) | No |
+| `GetAyanamsa` | Ayanamsa values | No |
+| `GetHouses` | Ascendant, MC, ARMC, Vertex, house cusps | No |
+| `GetRiseSet` | Rise, set and meridian transits | No |
+| `FindCrossings` | Exact times a body crosses signs, nakshatras or any longitudes | Yes |
+| `FindStations` | Exact times a body turns retrograde or direct | Yes |
+| `GetInfo` | Version, supported range, limits, source URL | No |
+
+### GetPositions
+
+Returns, for every instant, one `BodyPosition` per requested body: `longitude`, `latitude`, `distanceAu`, `longitudeSpeed`, `latitudeSpeed`, `distanceSpeed`. Optional `zodiac` and `observer` (topocentric). Limit: instants × bodies ≤ 10,000.
+
+```json
+{"instants": ["1990-05-17T08:30:00Z"],
+ "bodies": ["SUN", "MOON", "MARS", "TRUE_NODE"],
+ "zodiac": {"sidereal": {"ayanamsa": "LAHIRI"}}}
+```
+
+### StreamPositions
+
+Samples `from`, `from + stepDays`, … up to `to` and streams them in messages of up to 500 instants, each shaped like a `GetPositions` response. Limit: samples × bodies ≤ 1,000,000 per stream.
+
+```json
+{"from": "2026-01-01T00:00:00Z", "to": "2027-01-01T00:00:00Z", "stepDays": 1,
+ "bodies": ["SATURN", "JUPITER"], "zodiac": {"sidereal": {"ayanamsa": "LAHIRI"}}}
+```
+
+### GetAyanamsa
+
+Returns one value in degrees per instant, in request order, for the given `ayanamsa`. Limit: 10,000 instants.
+
+### GetHouses
+
+Each query is an instant plus a location; the response holds `ascendant`, `midheaven`, `armc`, `vertex` and 12 `cusps` (house 1 first) per query. When the system is undefined at that latitude (Placidus, Koch and the like beyond the polar circles), `cuspsDefined` is false and `cusps` is empty; the angles are still valid. Limit: 10,000 queries.
+
+```json
+{"system": "WHOLE_SIGN", "zodiac": {"sidereal": {"ayanamsa": "LAHIRI"}},
+ "queries": [{"instant": "1990-05-17T08:30:00Z",
+              "location": {"latitude": 50.45, "longitude": 30.52}}]}
+```
+
+### GetRiseSet
+
+For one `body`, each query returns the first requested events after its `after` instant at its location. `convention` defines rise and set: `UPPER_LIMB_REFRACTED` (default, the usual almanac sunrise), `CENTRE_NO_REFRACTION` (the disc centre on the true horizon, used for the Hindu sunrise) or `CENTRE_REFRACTED`. Limit: 10,000 events in total.
+
+```json
+{"body": "SUN", "convention": "CENTRE_NO_REFRACTION",
+ "queries": [{"after": "2026-10-10T21:00:00Z",
+              "location": {"latitude": 50.45, "longitude": 30.52},
+              "events": ["RISE", "SET"]}]}
+```
+
+### FindCrossings
+
+Returns every instant between `from` and `to` at which the body's longitude crosses a target, in time order, with the target `longitude` and `retrograde` = true when it crossed moving backwards. Targets are either a `grid` (every `offsetDegrees + k × stepDegrees`: 30 for signs, 13.333… for nakshatras, 3.333… for padas) or a `list` of exact longitudes (e.g. natal points). Limit: 10,000 results; a longer result fails with `INVALID_ARGUMENT`, so narrow the range.
+
+```json
+{"body": "SATURN", "from": "2026-01-01T00:00:00Z", "to": "2036-01-01T00:00:00Z",
+ "zodiac": {"sidereal": {"ayanamsa": "LAHIRI"}}, "grid": {"stepDegrees": 30}}
+```
+
+### FindStations
+
+Returns every station in the range, in time order: the instant, the longitude and `turnsRetrograde` (false = turns direct). The Sun, Moon, mean node and mean apogee never station and return an empty list. A retrograde period runs from a station with `turnsRetrograde` = true to the next one with false.
+
+### GetInfo
+
+Takes an empty request and returns `engineVersion`, `supportedFrom`, `supportedTo`, `maxItemsPerRequest` and `sourceUrl`. Read the range and limit from here instead of hard-coding them.
+
+## Errors and limits
+
+Errors are standard gRPC status codes with a human-readable description; only `UNAVAILABLE` and `DEADLINE_EXCEEDED` are worth retrying.
+
+| Status | When | What to do |
+| --- | --- | --- |
+| `INVALID_ARGUMENT` | Missing or unspecified field, bad coordinates, a limit exceeded, too many search results | Fix the request; do not retry |
+| `OUT_OF_RANGE` | An instant outside the supported range (`GetInfo`) | Clamp or reject on your side; do not retry |
+| `INTERNAL` | An engine failure that should not happen | Report it with the request; retry once at most |
+| `UNAVAILABLE` | Network problem or the service restarting | Retry with exponential backoff; every RPC is idempotent |
+| `DEADLINE_EXCEEDED` | Your deadline passed | Retry with a longer deadline or a narrower range |
+
+| Limit | Default |
+| --- | --- |
+| Instants × bodies (`GetPositions`), instants (`GetAyanamsa`), queries (`GetHouses`), events (`GetRiseSet`) | 10,000 per request |
+| Results of `FindCrossings` / `FindStations`, longitudes in a `list` | 10,000 per request |
+| Samples × bodies of one `StreamPositions` | 1,000,000 |
+| Message size | 4 MiB (gRPC default), well above the largest response the limits allow |
+
+The operator can change these limits; `GetInfo.maxItemsPerRequest` reports the current one.
+
+## Integration patterns
+
+Batch what you can: one call with many instants or bodies costs about as much as a single-body call, while every extra call adds a network round trip.
+
+- **Natal chart:** one `GetPositions` (the birth instant, all bodies, your zodiac) plus one `GetHouses` (same instant and zodiac, your house system), sent concurrently on the same channel. The lagna is `ascendant`; Ketu is the node's longitude + 180°, wrapped to [0, 360).
+- **Several charts at once** (synastry, a family): put all birth instants in one `GetPositions` and all queries in one `GetHouses`.
+- **Sunrise-based day data:** `GetRiseSet` for the Sun with `CENTRE_NO_REFRACTION`, then `GetPositions` at the returned sunrise.
+- **Transits by sign or nakshatra:** `FindCrossings` with a `grid` (30° signs, 360°/27 nakshatras, 360°/108 padas). This replaces sampling positions and comparing them yourself.
+- **Transits over natal points:** `FindCrossings` with a `list` of the natal longitudes, in the same zodiac as the natal chart.
+- **Retrograde periods:** `FindStations`; pair each `turnsRetrograde = true` with the next `false`.
+- **Ephemeris tables and charts over time:** `StreamPositions`, consuming messages as they arrive.
+
+Operational advice:
+
+- Create **one long-lived channel** per process and share it; channels multiplex calls and reconnect on their own.
+- Set a **deadline on every call**: about 2 s for positions, houses and rise/set; 30 s for searches over long ranges.
+- **Cache freely on your side:** a response depends only on its request, so equal requests always get equal responses. The service already caches `FindCrossings` and `FindStations` results in memory.
+- **Check the range first:** call `GetInfo` at startup and reject out-of-range dates before calling.
+
+## Accuracy and known limits
+
+Positions match the reference `swetest` tool built from the same sources to 1e-6°, and search instants are refined to about 0.1 s.
+
+- **Engine:** Swiss Ephemeris 2.10.03 with its DE441-based `.se1` files. The service refuses to start without them rather than fall back to the less precise Moshier model.
+- **Time scale:** UTC is used as UT1 (under 0.9 s apart); the engine applies ΔT itself.
+- **Stations of slow bodies** are only defined to about a second, because the body barely moves then.
+- **True node:** stations closer than 0.1 day apart are not resolved, and crossing searches skip wobbles smaller than 0.014°. Over 1900–2100 this missed none of the sign, nakshatra or pada crossings.
+- **Neptune and Pluto** occasionally station two or three times within an hour (moving under 0.5″); such a cluster is reported as one station.
+- **House systems** that are undefined beyond the polar circles report `cuspsDefined = false` instead of substitute cusps.
+- **Rise and set** use a standard atmosphere for refraction; pick `CENTRE_NO_REFRACTION` when you need the Hindu sunrise.
+
+## Licensing and versioning
+
+The service is open source under the GNU AGPL v3.0 or later; the contract is versioned by its package name.
+
+- **License:** the service and the Swiss Ephemeris it uses (© Astrodienst AG) are under the AGPL. Calling the service over the network from your own program is generally treated as communication between separate programs. If you modify the service and run it for others, section 13 of the AGPL requires offering them its source. This is not legal advice.
+- **Compatibility within `v1`:** only additions — new fields, RPCs and enum values. Generated clients ignore unknown fields; handle unknown enum values without failing.
+- **Breaking changes** get a new package (`me.lagna.ephemeris.v2`) served alongside `v1` for a transition period.
+- **Pin the contract:** generate your client from a tagged commit of the proto and regenerate when you upgrade.

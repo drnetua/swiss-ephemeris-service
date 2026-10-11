@@ -5,7 +5,8 @@ by Astrodienst AG. Every request carries all of its inputs, so responses can be 
 service can run as any number of identical replicas.
 
 The contract is [`ephemeris.proto`](src/main/proto/me/lagna/ephemeris/v1/ephemeris.proto)
-(package `me.lagna.ephemeris.v1`):
+(package `me.lagna.ephemeris.v1`); client developers start with the
+[integration guide](docs/INTEGRATION.md).
 
 | RPC               | What it returns                                                                    |
 |-------------------|------------------------------------------------------------------------------------|
