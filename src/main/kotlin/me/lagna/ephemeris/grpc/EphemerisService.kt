@@ -242,6 +242,7 @@ class EphemerisService(
             .setMaxItemsPerRequest(limits.maxItems)
             .setMaxStreamItems(limits.maxStreamItems)
             .setSourceUrl(sourceUrl)
+            .setServiceVersion(SERVICE_VERSION)
             .build()
 
     // ------------------------------------------------------------------------------------------ helpers
@@ -387,6 +388,9 @@ class EphemerisService(
 
     private companion object {
         const val STREAM_CHUNK = 500L
+
+        /** From the jar manifest; "dev" when running from classes (tests, IDE). */
+        val SERVICE_VERSION: String = EphemerisService::class.java.`package`?.implementationVersion ?: "dev"
         const val FULL_CIRCLE = 360.0
         val log: Logger = Logger.getLogger(EphemerisService::class.java.name)
 

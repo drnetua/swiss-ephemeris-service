@@ -292,4 +292,5 @@ message InfoResponse {
   uint32 max_items_per_request = 4;          // instants x bodies, queries, ...
   string source_url = 5;                     // AGPL section 13
   uint64 max_stream_items = 6;               // samples x bodies of one StreamPositions
+  string service_version = 7;                // release of this service, e.g. "0.1.0"; "dev" for local builds
 }

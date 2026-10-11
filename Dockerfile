@@ -1,49 +1,40 @@
 # syntax=docker/dockerfile:1.7
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
-# Example image: libswe and the .se1 files built from the pinned, checksum-verified sources, the service on a
-# JRE, a non-root user and a gRPC health check. Adapt it to your registry and platform as needed.
+# Runs a released build: downloads the release archive for this platform from GitHub, checks it against the
+# release's SHA256SUMS and runs it on a JRE as a non-root user with a gRPC health check.
 #
-#   docker build -t swiss-ephemeris-service .
-#   docker run --rm -p 50051:50051 swiss-ephemeris-service
+#   docker build -t swiss-ephemeris-service .                                   # latest release
+#   docker build --build-arg RELEASE=download/v0.1.0 -t swiss-ephemeris-service .  # a pinned release
+#
+# BuildKit re-checks the remote files on every build, so a rebuild picks up a new release and reuses the cache
+# otherwise. To build from the sources in this checkout instead, use Dockerfile.source.
 
-ARG JDK_IMAGE=eclipse-temurin:25-jdk-noble
 ARG JRE_IMAGE=eclipse-temurin:25-jre-noble
 
-# --- 1. libswe and the ephemeris files, on the same Ubuntu release as the runtime image ---------------------
-FROM ${JDK_IMAGE} AS native
-RUN apt-get update \
- && apt-get install -y --no-install-recommends gcc libc6-dev curl ca-certificates \
- && rm -rf /var/lib/apt/lists/*
-WORKDIR /src
-COPY native/ native/
-RUN --mount=type=cache,id=swisseph,target=/swe-cache \
-    SWE_CACHE=/swe-cache sh native/build-libswe.sh /out
+FROM ${JRE_IMAGE} AS fetch
+ARG REPOSITORY=drnetua/swiss-ephemeris-service
+# "latest/download" for the newest release, or "download/<tag>" for a pinned one.
+ARG RELEASE=latest/download
+# Where the release files are; overridable to test an archive before it is published.
+ARG BASE_URL=https://github.com/${REPOSITORY}/releases/${RELEASE}
+ARG TARGETARCH
+ADD ${BASE_URL}/SHA256SUMS /tmp/release/
+ADD ${BASE_URL}/swiss-ephemeris-service-linux-${TARGETARCH}.tar.gz /tmp/release/
+RUN cd /tmp/release \
+ && sha256sum --check --ignore-missing --strict SHA256SUMS \
+ && mkdir /out \
+ && tar -xzf swiss-ephemeris-service-linux-${TARGETARCH}.tar.gz -C /out
 
-# --- 2. The service, as a Gradle application distribution -------------------------------------------------
-FROM ${JDK_IMAGE} AS app
-WORKDIR /src
-COPY gradlew settings.gradle.kts build.gradle.kts ./
-COPY gradle/ gradle/
-RUN --mount=type=cache,target=/root/.gradle ./gradlew --no-daemon --quiet --version
-COPY src/ src/
-# Tests run in CI; add `test` here (it needs gcc and curl in this stage) to run them in the image build too.
-RUN --mount=type=cache,target=/root/.gradle ./gradlew --no-daemon installDist
-
-# --- 3. Runtime -------------------------------------------------------------------------------------------
 FROM ${JRE_IMAGE}
 LABEL org.opencontainers.image.title="swiss-ephemeris-service" \
       org.opencontainers.image.description="Stateless gRPC ephemeris service built on the Swiss Ephemeris" \
       org.opencontainers.image.source="https://github.com/drnetua/swiss-ephemeris-service" \
       org.opencontainers.image.licenses="AGPL-3.0-or-later"
 
-COPY --from=native /out/lib/libswe.so /opt/swe/lib/libswe.so
-COPY --from=native /out/ephe/ /opt/swe/ephe/
-COPY --from=app /src/build/install/swiss-ephemeris-service/ /app/
+COPY --from=fetch /out/swiss-ephemeris-service/ /app/
 
-ENV SWE_LIB=/opt/swe/lib/libswe.so \
-    SWE_EPHE=/opt/swe/ephe \
-    PORT=50051 \
+ENV PORT=50051 \
     JAVA_OPTS="-XX:MaxRAMPercentage=75"
 
 USER 10001:10001

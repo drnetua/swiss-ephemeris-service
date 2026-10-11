@@ -52,22 +52,58 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: docker/setup-buildx-action@v3
-      - name: Build and start
-        run: docker compose up -d --build --wait --wait-timeout 180 ephemeris
+      - name: Build from source and start
+        run: docker compose -f compose.yaml -f compose.source.yaml up -d --build --wait --wait-timeout 180 ephemeris
       - name: Call GetInfo from a client container
         run: |
-          if ! out=$(docker compose run --rm -T grpcurl 2>&1) || ! echo "$out" | grep -qE '"(engine_version|engineVersion)": "Swiss Ephemeris 2.10'; then
+          if ! out=$(docker compose -f compose.yaml -f compose.source.yaml run --rm -T grpcurl 2>&1) || ! echo "$out" | grep -qE '"(engine_version|engineVersion)": "Swiss Ephemeris 2.10'; then
             echo "$out"
             echo "$out" | tail -n 8 | sed 's/^/::error title=grpcurl::/'
             exit 1
           fi
           echo "$out"
-          echo "::notice title=docker::$(docker image inspect swiss-ephemeris-service:local --format '{{.Size}}' | awk '{printf "image %.0f MB", $1/1000000}')"
+          echo "::notice title=docker::$(docker image inspect swiss-ephemeris-service:source --format '{{.Size}}' | awk '{printf "image %.0f MB", $1/1000000}')"
       - name: Container logs
         if: failure()
         run: |
-          docker compose logs --no-log-prefix ephemeris
-          docker compose logs --no-log-prefix ephemeris | tail -n 10 | sed 's/^/::error title=container::/'
+          docker compose -f compose.yaml -f compose.source.yaml logs --no-log-prefix ephemeris
+          docker compose -f compose.yaml -f compose.source.yaml logs --no-log-prefix ephemeris | tail -n 10 | sed 's/^/::error title=container::/'
       - name: Stop
         if: always()
-        run: docker compose down
+        run: docker compose -f compose.yaml -f compose.source.yaml down
+
+  release-dry-run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "25"
+      - uses: gradle/actions/setup-gradle@v5
+      - name: Build the archive as a release would
+        run: |
+          ./gradlew installDist -PreleaseVersion=0.0.0-ci --stacktrace
+          sh native/build-libswe.sh "$RUNNER_TEMP/native"
+          scripts/package-release.sh amd64 build/install/swiss-ephemeris-service "$RUNNER_TEMP/native" "$RUNNER_TEMP/release"
+          (cd "$RUNNER_TEMP/release" && sha256sum swiss-ephemeris-service-linux-*.tar.gz > SHA256SUMS)
+      - name: Run the archive without Docker
+        run: scripts/smoke-archive.sh "$RUNNER_TEMP/release/swiss-ephemeris-service-linux-amd64.tar.gz"
+      - name: Build the release Dockerfile from the archive and call it
+        run: |
+          (cd "$RUNNER_TEMP/release" && python3 -m http.server 8765 >/dev/null 2>&1 &)
+          sleep 2
+          docker build --network host --build-arg BASE_URL=http://127.0.0.1:8765 -t swiss-ephemeris-service:dry-run .
+          docker run -d --name dry-run -p 50051:50051 swiss-ephemeris-service:dry-run
+          for i in $(seq 1 30); do
+            [ "$(docker inspect -f '{{.State.Health.Status}}' dry-run)" = healthy ] && break
+            sleep 3
+          done
+          out=$(docker run --rm --network host fullstorydev/grpcurl:v1.9.1 -plaintext 127.0.0.1:50051 me.lagna.ephemeris.v1.Ephemeris/GetInfo 2>&1) || true
+          echo "$out"
+          if ! echo "$out" | grep -qE '"(service_version|serviceVersion)": "0.0.0-ci"'; then
+            echo "$out" | tail -n 8 | sed 's/^/::error title=dry-run grpcurl::/'
+            docker logs dry-run 2>&1 | tail -n 8 | sed 's/^/::error title=dry-run container::/'
+            exit 1
+          fi
+          echo "::notice title=release::$(ls -l "$RUNNER_TEMP"/release/*.tar.gz | awk '{printf "archive %.1f MB", $5/1000000}')"

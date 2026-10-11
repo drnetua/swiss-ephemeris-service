@@ -1,18 +1,26 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
-# Example: run the service locally and try it.
+# Example: run the latest release and try it.
 #
-#   docker compose up -d --build                # build and start; healthy after the startup self-check
+#   docker compose up -d                        # builds from the latest release; healthy after the self-check
 #   docker compose run --rm grpcurl             # call GetInfo from a client container
 #   docker compose down
+#
+# Every `up` re-checks the latest GitHub release (pull_policy: build) and rebuilds only when it changed.
+# Pin a release with RELEASE=download/v0.1.0 in the environment or in an .env file next to this file.
+# Build from this checkout's sources instead: docker compose -f compose.yaml -f compose.source.yaml up -d --build
 #
 # Every setting below is optional; the values shown are the defaults unless noted. TLS, public addresses and
 # scaling belong to your own deployment.
 
 services:
   ephemeris:
-    build: .
-    image: swiss-ephemeris-service:local
+    build:
+      context: .
+      args:
+        RELEASE: ${RELEASE:-latest/download}
+    pull_policy: build
+    image: swiss-ephemeris-service:release
     ports:
       - "50051:50051"                       # drop this when only other containers on the network call it
     environment:
