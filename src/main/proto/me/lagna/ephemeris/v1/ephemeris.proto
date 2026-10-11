@@ -1,0 +1,295 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 Anton Husiev
+//
+// Stateless astronomical calculations backed by the Swiss Ephemeris.
+// Every request carries all of its inputs; the service keeps no per-client state,
+// so any response can be cached by its request.
+//
+// Instants are UTC and are used as UT1 (they differ by less than a second).
+// Longitudes are in degrees [0, 360). Batched results keep the order of the request.
+// Errors use gRPC status codes: INVALID_ARGUMENT for malformed or oversized requests,
+// OUT_OF_RANGE for instants outside the supported range (see GetInfo).
+
+syntax = "proto3";
+
+package me.lagna.ephemeris.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option java_package = "me.lagna.ephemeris.v1";
+option java_multiple_files = true;
+
+service Ephemeris {
+  // Positions of several bodies at several instants in one call (instants x bodies).
+  rpc GetPositions(PositionsRequest) returns (PositionsResponse);
+
+  // Positions sampled at a fixed step over a time range, streamed in chunks.
+  rpc StreamPositions(PositionRangeRequest) returns (stream PositionsResponse);
+
+  // Ayanamsa values for several instants.
+  rpc GetAyanamsa(AyanamsaRequest) returns (AyanamsaResponse);
+
+  // Angles (ASC, MC, ARMC, Vertex) and house cusps for several instants and places.
+  rpc GetHouses(HousesRequest) returns (HousesResponse);
+
+  // Rise, set and meridian transits of a body after given instants.
+  rpc GetRiseSet(RiseSetRequest) returns (RiseSetResponse);
+
+  // Exact instants when a body crosses a grid of longitudes (signs, nakshatras, any step) in a range.
+  rpc FindCrossings(CrossingsRequest) returns (CrossingsResponse);
+
+  // Exact instants when a body turns retrograde or direct in a range.
+  rpc FindStations(StationsRequest) returns (StationsResponse);
+
+  // Engine version, supported date range, limits and the source code location (AGPL section 13).
+  rpc GetInfo(InfoRequest) returns (InfoResponse);
+}
+
+// ---------------------------------------------------------------- common types
+
+enum Body {
+  BODY_UNSPECIFIED = 0;
+  SUN = 1;
+  MOON = 2;
+  MERCURY = 3;
+  VENUS = 4;
+  MARS = 5;
+  JUPITER = 6;
+  SATURN = 7;
+  URANUS = 8;
+  NEPTUNE = 9;
+  PLUTO = 10;
+  MEAN_NODE = 11;
+  TRUE_NODE = 12;
+  MEAN_APOGEE = 13;
+  CHIRON = 14;
+}
+
+enum Ayanamsa {
+  AYANAMSA_UNSPECIFIED = 0;
+  LAHIRI = 1;
+  RAMAN = 2;
+  KRISHNAMURTI = 3;
+  FAGAN_BRADLEY = 4;
+  YUKTESHWAR = 5;
+  TRUE_CHITRAPAKSHA = 6;
+  TRUE_REVATI = 7;
+  TRUE_PUSHYA = 8;
+}
+
+// Tropical when absent or empty; sidereal with the given ayanamsa otherwise.
+message Zodiac {
+  oneof frame {
+    Tropical tropical = 1;
+    Sidereal sidereal = 2;
+  }
+}
+
+message Tropical {}
+
+message Sidereal {
+  Ayanamsa ayanamsa = 1;
+}
+
+message GeoLocation {
+  double latitude = 1;   // degrees, north positive
+  double longitude = 2;  // degrees, east positive
+  double altitude_m = 3; // metres above sea level, optional
+}
+
+// ---------------------------------------------------------------- positions
+
+message PositionsRequest {
+  repeated google.protobuf.Timestamp instants = 1; // UTC
+  repeated Body bodies = 2;
+  Zodiac zodiac = 3;
+  // Topocentric positions for this place; geocentric when absent.
+  optional GeoLocation observer = 4;
+}
+
+message PositionsResponse {
+  repeated InstantPositions results = 1; // same order as the request's instants
+}
+
+message InstantPositions {
+  google.protobuf.Timestamp instant = 1;
+  repeated BodyPosition positions = 2;   // same order as the request's bodies
+}
+
+message BodyPosition {
+  Body body = 1;
+  double longitude = 2;       // degrees [0, 360)
+  double latitude = 3;        // degrees
+  double distance_au = 4;
+  double longitude_speed = 5; // degrees per day, negative when retrograde
+  double latitude_speed = 6;
+  double distance_speed = 7;
+}
+
+message PositionRangeRequest {
+  google.protobuf.Timestamp from = 1;
+  google.protobuf.Timestamp to = 2;
+  double step_days = 3;     // e.g. 1.0 or 0.25; chunks of up to 500 instants are streamed
+  repeated Body bodies = 4;
+  Zodiac zodiac = 5;
+}
+
+// ---------------------------------------------------------------- ayanamsa
+
+message AyanamsaRequest {
+  repeated google.protobuf.Timestamp instants = 1;
+  Ayanamsa ayanamsa = 2;
+}
+
+message AyanamsaResponse {
+  repeated double degrees = 1; // same order as the request's instants
+}
+
+// ---------------------------------------------------------------- houses
+
+enum HouseSystem {
+  HOUSE_SYSTEM_UNSPECIFIED = 0;
+  WHOLE_SIGN = 1;
+  EQUAL = 2;
+  PLACIDUS = 3;
+  SRIPATI = 4;
+  KOCH = 5;
+  PORPHYRY = 6;
+  REGIOMONTANUS = 7;
+  CAMPANUS = 8;
+}
+
+message HousesRequest {
+  repeated HouseQuery queries = 1;
+  HouseSystem system = 2;
+  Zodiac zodiac = 3;
+}
+
+message HouseQuery {
+  google.protobuf.Timestamp instant = 1;
+  GeoLocation location = 2;
+}
+
+message HousesResponse {
+  repeated HousesResult results = 1; // same order as the request's queries
+}
+
+message HousesResult {
+  double ascendant = 1;
+  double midheaven = 2;
+  double armc = 3;
+  double vertex = 4;
+  repeated double cusps = 5; // 12 values, house 1 first; empty when undefined
+  // False when the system is undefined at this latitude (e.g. Placidus beyond the polar circles);
+  // the angles are still valid then.
+  bool cusps_defined = 6;
+}
+
+// ---------------------------------------------------------------- rise / set
+
+enum RiseSetEvent {
+  RISE_SET_EVENT_UNSPECIFIED = 0;
+  RISE = 1;
+  SET = 2;
+  UPPER_TRANSIT = 3;
+  LOWER_TRANSIT = 4;
+}
+
+// How rise and set are defined; ignored for transits. Unspecified means UPPER_LIMB_REFRACTED.
+enum DiscConvention {
+  DISC_CONVENTION_UNSPECIFIED = 0;
+  CENTRE_NO_REFRACTION = 1;  // disc centre on the horizon, no refraction
+  UPPER_LIMB_REFRACTED = 2;  // upper limb with standard refraction
+  CENTRE_REFRACTED = 3;
+}
+
+message RiseSetRequest {
+  Body body = 1;
+  repeated RiseSetQuery queries = 2;
+  DiscConvention convention = 3;
+}
+
+message RiseSetQuery {
+  google.protobuf.Timestamp after = 1;
+  GeoLocation location = 2;
+  repeated RiseSetEvent events = 3;
+}
+
+message RiseSetResponse {
+  repeated RiseSetResult results = 1; // same order as the request's queries
+}
+
+message RiseSetResult {
+  repeated RiseSetTime times = 1;     // same order as the query's events
+}
+
+message RiseSetTime {
+  RiseSetEvent event = 1;
+  // Absent when the body does not rise or set there that day (polar day or night).
+  optional google.protobuf.Timestamp instant = 2;
+}
+
+// ---------------------------------------------------------------- crossings and stations
+
+message CrossingsRequest {
+  Body body = 1;
+  Zodiac zodiac = 2;
+  google.protobuf.Timestamp from = 3;
+  google.protobuf.Timestamp to = 4;
+  // Grid of target longitudes: offset_degrees + k * step_degrees, modulo 360. step_degrees must divide
+  // 360 into a whole number of parts (30 for signs, 360/27 for nakshatras, 360/108 for padas), otherwise
+  // INVALID_ARGUMENT. Or list exact longitudes instead.
+  oneof targets {
+    LongitudeGrid grid = 5;
+    LongitudeList list = 6;
+  }
+}
+
+message LongitudeGrid {
+  double step_degrees = 1;
+  double offset_degrees = 2;
+}
+
+message LongitudeList {
+  repeated double longitudes = 1;
+}
+
+message CrossingsResponse {
+  repeated Crossing crossings = 1; // chronological
+}
+
+message Crossing {
+  google.protobuf.Timestamp instant = 1;
+  double longitude = 2;       // the target longitude crossed
+  bool retrograde = 3;        // crossed while moving backwards
+}
+
+message StationsRequest {
+  Body body = 1;
+  Zodiac zodiac = 2;
+  google.protobuf.Timestamp from = 3;
+  google.protobuf.Timestamp to = 4;
+}
+
+message StationsResponse {
+  repeated Station stations = 1; // chronological
+}
+
+message Station {
+  google.protobuf.Timestamp instant = 1;
+  double longitude = 2;
+  bool turns_retrograde = 3; // false: turns direct
+}
+
+// ---------------------------------------------------------------- info
+
+message InfoRequest {}
+
+message InfoResponse {
+  string engine_version = 1;                 // e.g. "Swiss Ephemeris 2.10.03"
+  google.protobuf.Timestamp supported_from = 2;
+  google.protobuf.Timestamp supported_to = 3;
+  uint32 max_items_per_request = 4;          // instants x bodies, queries, ...
+  string source_url = 5;                     // AGPL section 13
+  uint64 max_stream_items = 6;               // samples x bodies of one StreamPositions
+}

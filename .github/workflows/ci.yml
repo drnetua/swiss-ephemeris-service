@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "25"
+      - uses: gradle/actions/setup-gradle@v5
+      - name: Build and test
+        run: ./gradlew build --stacktrace
+      - name: Performance
+        run: ./gradlew perfTest --stacktrace
+      - name: Report performance
+        if: always()
+        run: |
+          if [ -f build/perf/results.txt ]; then
+            while IFS= read -r line; do echo "::notice title=perf::$line"; done < build/perf/results.txt
+            { echo '### Search performance'; echo; sed 's/^/- /' build/perf/results.txt; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Report test failures
+        if: failure()
+        run: |
+          python3 - <<'EOF'
+          import glob, xml.etree.ElementTree as ET
+          for path in glob.glob("build/test-results/*/*.xml"):
+              for case in ET.parse(path).getroot().iter("testcase"):
+                  for failure in list(case.iter("failure")) + list(case.iter("error")):
+                      message = (failure.get("message") or failure.text or "").replace("\n", " ")[:600]
+                      print(f"::error title={case.get('classname')}::{case.get('name')}: {message}")
+          EOF
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: build/reports/tests/
