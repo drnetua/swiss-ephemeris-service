@@ -59,9 +59,14 @@ Environment variables (system properties in brackets, used by Gradle runs and te
 - **Threads.** libswe keeps its settings in thread-local storage, so all calls run on a fixed pool of
   platform threads, and each call sets the modes it needs (sidereal mode, topocentric observer). A whole
   request, or a whole search, runs in one session on one worker.
-- **Searches.** Stations are sign changes of the longitude speed, found by sampling and refined by
-  bisection. Between stations the longitude is monotonic, so every target longitude is crossed once and is
-  refined by bisection to about 0.1 s.
+- **Searches.** Stations are sign changes of the longitude speed, sampled every 4 days for Mercury, 0.1 day
+  for the true node and 10 days for other bodies (at least 4 times shorter than the shortest gap between
+  stations over 1800–2400) and refined by bisection. Between stations the longitude is monotonic, so crossings
+  are found from longitudes sampled once a day plus the stations, each refined by bisection to about 0.1 s.
+  Over 1900–2100 these steps found the same stations and missed none of the sign, nakshatra or pada
+  crossings found by sampling every 0.005 day. Limits: true node stations closer than 0.1 day are not
+  resolved (its crossing searches split at a 0.5-day step, which skips only loops under 0.014°), and the
+  rare Neptune and Pluto station clusters within an hour (under 0.5″) are reported as one station.
 - **Searches without speed.** Crossing searches only need longitudes, so by default they call libswe without
   `SEFLG_SPEED` (about 5 µs instead of 9 µs per call); station searches still use the speed. Over 2000–2050,
   all 14 bodies, tropical and Lahiri, sign and nakshatra grids, the 69,397 crossings found both ways were

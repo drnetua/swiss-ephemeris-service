@@ -77,19 +77,23 @@ sealed interface LongitudeTargets {
 /**
  * Exact instants of stations and longitude crossings.
  *
- * The range is sampled at [step] days, short enough that a body stations at most once and moves well under
- * 180 degrees between two samples. Stations are the sign changes of the speed, refined by bisection. Between
- * consecutive samples and stations the longitude is monotonic, so every target in between is crossed exactly
- * once and is refined by bisection as well.
+ * Stations are the sign changes of the speed: the speed is sampled every [stationStep] days, which must be
+ * shorter than the shortest gap between two stations of the body, and each sign change is refined by
+ * bisection. Crossings need only longitudes: they are sampled every [crossingStep] days (the body must move
+ * well under 180 degrees in that time) with the stations added as extra samples, so the longitude is
+ * monotonic between consecutive samples and every target in between is crossed exactly once and refined by
+ * bisection as well.
  */
 class MotionSearch(
     private val source: MotionSource,
-    private val step: Double,
+    private val stationStep: Double,
     private val canStation: Boolean,
+    private val crossingStep: Double = DEFAULT_CROSSING_STEP_DAYS,
     private val tolerance: Double = DEFAULT_TOLERANCE_DAYS,
 ) {
     init {
-        require(step > 0.0) { "step must be positive" }
+        require(stationStep > 0.0) { "stationStep must be positive" }
+        require(crossingStep > 0.0) { "crossingStep must be positive" }
     }
 
     fun stations(
@@ -101,7 +105,7 @@ class MotionSearch(
         var a = from
         var speedA = source.at(a).speed
         while (a < to) {
-            val c = minOf(a + step, to)
+            val c = minOf(a + stationStep, to)
             val speedC = source.at(c).speed
             if (isNegative(speedA) != isNegative(speedC)) {
                 hits += StationHit(refineStation(a, c, speedA), turnsRetrograde = isNegative(speedC))
@@ -152,10 +156,10 @@ class MotionSearch(
         stations: List<Double>,
     ): List<Double> {
         val times = sortedSetOf(from, to)
-        var t = from + step
+        var t = from + crossingStep
         while (t < to) {
             times += t
-            t += step
+            t += crossingStep
         }
         times += stations
         return times.toList()
@@ -199,6 +203,9 @@ class MotionSearch(
     companion object {
         /** About 0.09 s. */
         const val DEFAULT_TOLERANCE_DAYS = 1e-6
+
+        /** The Moon, the fastest body, moves about 15 degrees a day. */
+        const val DEFAULT_CROSSING_STEP_DAYS = 1.0
 
         private fun isNegative(value: Double) = value < 0.0
 

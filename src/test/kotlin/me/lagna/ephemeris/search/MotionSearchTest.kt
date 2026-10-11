@@ -22,7 +22,7 @@ class MotionSearchTest {
 
     @org.junit.jupiter.api.Test
     fun `finds grid crossings across 360 degrees`() {
-        val hits = MotionSearch(linear, step = 1.0, canStation = false).crossings(0.0, 40.0, LongitudeTargets.Grid(30.0))
+        val hits = MotionSearch(linear, stationStep = 1.0, canStation = false).crossings(0.0, 40.0, LongitudeTargets.Grid(30.0))
         hits.map { it.longitude } shouldBe listOf(0.0, 30.0)
         hits[0].jd shouldBe (5.0 plusOrMinus 1e-5)
         hits[1].jd shouldBe (35.0 plusOrMinus 1e-5)
@@ -32,14 +32,14 @@ class MotionSearchTest {
     @org.junit.jupiter.api.Test
     fun `finds explicit longitudes and ignores the start value`() {
         val hits =
-            MotionSearch(linear, step = 1.0, canStation = false)
+            MotionSearch(linear, stationStep = 1.0, canStation = false)
                 .crossings(0.0, 40.0, LongitudeTargets.Explicit(listOf(355.0, 10.0)))
         hits.map { it.longitude } shouldBe listOf(10.0)
     }
 
     @org.junit.jupiter.api.Test
     fun `stations split the motion so each target is crossed in both directions`() {
-        val search = MotionSearch(looping, step = 0.5, canStation = true)
+        val search = MotionSearch(looping, stationStep = 0.5, canStation = true)
         val stations = search.stations(0.0, 20.0)
         stations shouldHaveSize 2
         stations[0].turnsRetrograde shouldBe true
@@ -70,7 +70,7 @@ class MotionSearchTest {
                     return linear.at(jd).longitude
                 }
             }
-        MotionSearch(counting, step = 1.0, canStation = false).crossings(0.0, 40.0, LongitudeTargets.Grid(30.0))
+        MotionSearch(counting, stationStep = 1.0, canStation = false).crossings(0.0, 40.0, LongitudeTargets.Grid(30.0))
         fullCalls shouldBe 0
         (longitudeCalls > 0) shouldBe true
     }
@@ -78,7 +78,7 @@ class MotionSearchTest {
     @org.junit.jupiter.api.Test
     fun `stops at the result limit`() {
         shouldThrow<MotionSearch.TooManyResultsException> {
-            MotionSearch(linear, step = 1.0, canStation = false).crossings(0.0, 400.0, LongitudeTargets.Grid(1.0), limit = 10)
+            MotionSearch(linear, stationStep = 1.0, canStation = false).crossings(0.0, 400.0, LongitudeTargets.Grid(1.0), limit = 10)
         }
     }
 

@@ -191,7 +191,7 @@ class EphemerisService(
             val targets = targets(request)
             cache.getOrCompute(CacheKey("FindCrossings", request), CrossingsResponse.parser()) {
                 ephemeris.session {
-                    val hits = search(body, frame).crossings(from, to, targets, limits.maxItems)
+                    val hits = search(body, frame, forCrossings = true).crossings(from, to, targets, limits.maxItems)
                     val response = CrossingsResponse.newBuilder()
                     for (hit in hits) {
                         response.addCrossings(
@@ -215,7 +215,7 @@ class EphemerisService(
             cache.getOrCompute(CacheKey("FindStations", request), StationsResponse.parser()) {
                 ephemeris.session {
                     val response = StationsResponse.newBuilder()
-                    for (hit in search(body, frame).stations(from, to)) {
+                    for (hit in search(body, frame, forCrossings = false).stations(from, to)) {
                         if (response.stationsCount == limits.maxItems) throw MotionSearch.TooManyResultsException(limits.maxItems)
                         response.addStations(
                             Station
@@ -278,6 +278,7 @@ class EphemerisService(
     private fun SweSession.search(
         seBody: Int,
         frame: Frame,
+        forCrossings: Boolean,
     ): MotionSearch =
         MotionSearch(
             source =
@@ -290,7 +291,7 @@ class EphemerisService(
                     override fun longitudeAt(jd: Double): Double =
                         if (searchWithoutSpeed) longitude(jd, seBody, frame) else at(jd).longitude
                 },
-            step = ProtoMapping.searchStep(seBody),
+            stationStep = if (forCrossings) ProtoMapping.crossingStationStep(seBody) else ProtoMapping.stationStep(seBody),
             canStation = ProtoMapping.canStation(seBody),
         )
 
