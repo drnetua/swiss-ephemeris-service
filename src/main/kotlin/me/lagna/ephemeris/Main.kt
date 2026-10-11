@@ -22,7 +22,7 @@ fun main() {
     val server: Server =
         NettyServerBuilder
             .forPort(config.port)
-            .addService(EphemerisService(ephemeris, cache, config.limits, config.sourceUrl))
+            .addService(EphemerisService(ephemeris, cache, config.limits, config.sourceUrl, config.searchWithoutSpeed))
             .addService(health.healthService)
             .addService(ProtoReflectionServiceV1.newInstance())
             .build()

@@ -54,6 +54,7 @@ class EphemerisService(
     private val cache: ResultCache,
     private val limits: ServiceConfig.Limits = ServiceConfig.Limits(),
     private val sourceUrl: String = ServiceConfig.DEFAULT_SOURCE_URL,
+    private val searchWithoutSpeed: Boolean = true,
 ) : EphemerisGrpcKt.EphemerisCoroutineImplBase() {
     private val supportedFrom = JulianDay.ofEpochSecond(limits.supportedFrom.epochSecond)
     private val supportedTo = JulianDay.ofEpochSecond(limits.supportedTo.epochSecond)
@@ -280,9 +281,14 @@ class EphemerisService(
     ): MotionSearch =
         MotionSearch(
             source =
-                MotionSource { jd ->
-                    val p = position(jd, seBody, frame)
-                    Motion(p.longitude, p.longitudeSpeed)
+                object : MotionSource {
+                    override fun at(jd: Double): Motion {
+                        val p = position(jd, seBody, frame)
+                        return Motion(p.longitude, p.longitudeSpeed)
+                    }
+
+                    override fun longitudeAt(jd: Double): Double =
+                        if (searchWithoutSpeed) longitude(jd, seBody, frame) else at(jd).longitude
                 },
             step = ProtoMapping.searchStep(seBody),
             canStation = ProtoMapping.canStation(seBody),

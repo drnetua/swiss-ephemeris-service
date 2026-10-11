@@ -40,6 +40,22 @@ class SwissEphemerisTest {
     }
 
     @Test
+    fun `longitude without speed matches the full position`() {
+        val lahiri = Frame(SweConstants.SE_SIDM_LAHIRI)
+        val bodies = listOf(SweConstants.SE_SUN, SweConstants.SE_MOON, SweConstants.SE_MERCURY, SweConstants.SE_TRUE_NODE)
+        ephemeris.sessionBlocking {
+            for (body in bodies) {
+                for (frame in listOf(Frame.TROPICAL, lahiri)) {
+                    for (day in 0 until 3650 step 37) {
+                        val jd = J2000 + day + 0.123
+                        longitude(jd, body, frame) shouldBe (position(jd, body, frame).longitude plusOrMinus 1e-12)
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
     fun `settings of one call never leak into the next`() {
         ephemeris.sessionBlocking {
             position(J2000, SweConstants.SE_MOON, Frame(SweConstants.SE_SIDM_LAHIRI), kyiv)

@@ -13,6 +13,12 @@ data class Motion(
 /** Motion of one body in one frame as a function of the Julian day (UT). */
 fun interface MotionSource {
     fun at(jd: Double): Motion
+
+    /**
+     * Longitude alone. Crossing searches only need this; a source can override it with a cheaper
+     * calculation (libswe without `SEFLG_SPEED`), while station searches still use [at].
+     */
+    fun longitudeAt(jd: Double): Double = at(jd).longitude
 }
 
 data class StationHit(
@@ -120,9 +126,9 @@ class MotionSearch(
         val knots = sampleTimes(from, to, stations(from, to).map { it.jd })
         val hits = mutableListOf<CrossingHit>()
         var a = knots.first()
-        var longitudeA = source.at(a).longitude
+        var longitudeA = source.longitudeAt(a)
         for (c in knots.drop(1)) {
-            val longitudeC = source.at(c).longitude
+            val longitudeC = source.longitudeAt(c)
             val delta = signedDelta(longitudeC - longitudeA)
             if (delta != 0.0) {
                 val lower = minOf(longitudeA, longitudeA + delta)
@@ -180,7 +186,7 @@ class MotionSearch(
         var hi = end
         while (hi - lo > tolerance) {
             val mid = (lo + hi) / 2
-            val offset = signedDelta(source.at(mid).longitude - target)
+            val offset = signedDelta(source.longitudeAt(mid) - target)
             if (offset != 0.0 && isNegative(offset) == startSide) lo = mid else hi = mid
         }
         return (lo + hi) / 2

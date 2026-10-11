@@ -50,6 +50,7 @@ Environment variables (system properties in brackets, used by Gradle runs and te
 | `MAX_ITEMS`        | `10000`                       | Limit per request: instants × bodies, queries, results  |
 | `MAX_STREAM_ITEMS` | `1000000`                     | Limit per stream: samples × bodies                      |
 | `CACHE_MAX_MB`     | `64`                          | In-process cache of search results; `0` disables it     |
+| `SEARCH_WITHOUT_SPEED` | `true`                    | Crossing searches compute longitudes without `SEFLG_SPEED` |
 | `SOURCE_URL`       | this repository               | Reported by `GetInfo`                                   |
 
 ## Design notes
@@ -60,6 +61,11 @@ Environment variables (system properties in brackets, used by Gradle runs and te
 - **Searches.** Stations are sign changes of the longitude speed, found by sampling and refined by
   bisection. Between stations the longitude is monotonic, so every target longitude is crossed once and is
   refined by bisection to about 0.1 s.
+- **Searches without speed.** Crossing searches only need longitudes, so by default they call libswe without
+  `SEFLG_SPEED` (about 5 µs instead of 9 µs per call); station searches still use the speed. Over 2000–2050,
+  all 14 bodies, tropical and Lahiri, sign and nakshatra grids, the 69,397 crossings found both ways were
+  identical to the millisecond, and calls with speed dropped from 4.7 to 1.6 million. Set
+  `SEARCH_WITHOUT_SPEED=false` to always request speed.
 - **Cache.** `ResultCache` is a small interface; `CaffeineResultCache` keeps `FindCrossings` and
   `FindStations` results in memory. A shared cache can implement the same interface using
   `CacheKey.digest()` (SHA-256 of the method and the deterministically serialised request).

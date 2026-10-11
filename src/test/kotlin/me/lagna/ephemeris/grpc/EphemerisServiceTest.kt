@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
 import me.lagna.ephemeris.TestEphemeris
 import me.lagna.ephemeris.cache.CaffeineResultCache
+import me.lagna.ephemeris.cache.NoopResultCache
 import me.lagna.ephemeris.timestamp
 import me.lagna.ephemeris.toInstant
 import me.lagna.ephemeris.v1.Ayanamsa
@@ -156,6 +157,56 @@ class EphemerisServiceTest {
             client.findCrossings(request).crossingsList shouldBe crossings
             cache.hitCount() shouldBe 1L
         }
+    }
+
+    @Test
+    fun `crossings without speed are identical to crossings with speed`() {
+        val withSpeedName = InProcessServerBuilder.generateName()
+        val withSpeedServer =
+            InProcessServerBuilder
+                .forName(withSpeedName)
+                .directExecutor()
+                .addService(EphemerisService(TestEphemeris.instance, NoopResultCache, searchWithoutSpeed = false))
+                .build()
+                .start()
+        val withSpeedChannel = InProcessChannelBuilder.forName(withSpeedName).directExecutor().build()
+        val withSpeed = EphemerisGrpcKt.EphemerisCoroutineStub(withSpeedChannel)
+        try {
+            runBlocking {
+                val requests =
+                    listOf(
+                        crossings(Body.MOON, "2024-01-01T00:00:00Z", "2025-01-01T00:00:00Z", 360.0 / 27, lahiri),
+                        crossings(Body.MERCURY, "2020-01-01T00:00:00Z", "2030-01-01T00:00:00Z", 30.0, lahiri),
+                        crossings(Body.TRUE_NODE, "2000-01-01T00:00:00Z", "2020-01-01T00:00:00Z", 30.0, null),
+                    )
+                for (request in requests) {
+                    val fast = client.findCrossings(request).crossingsList
+                    (fast.size > 0) shouldBe true
+                    fast shouldBe withSpeed.findCrossings(request).crossingsList
+                }
+            }
+        } finally {
+            withSpeedChannel.shutdownNow()
+            withSpeedServer.shutdownNow()
+        }
+    }
+
+    private fun crossings(
+        body: Body,
+        from: String,
+        to: String,
+        step: Double,
+        zodiac: Zodiac?,
+    ): CrossingsRequest {
+        val request =
+            CrossingsRequest
+                .newBuilder()
+                .setBody(body)
+                .setFrom(timestamp(from))
+                .setTo(timestamp(to))
+                .setGrid(LongitudeGrid.newBuilder().setStepDegrees(step))
+        zodiac?.let { request.setZodiac(it) }
+        return request.build()
     }
 
     @Test

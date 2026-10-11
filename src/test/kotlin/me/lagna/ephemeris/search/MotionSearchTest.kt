@@ -55,6 +55,27 @@ class MotionSearchTest {
     }
 
     @org.junit.jupiter.api.Test
+    fun `crossing searches ask only for longitudes when the body cannot station`() {
+        var fullCalls = 0
+        var longitudeCalls = 0
+        val counting =
+            object : MotionSource {
+                override fun at(jd: Double): Motion {
+                    fullCalls++
+                    return linear.at(jd)
+                }
+
+                override fun longitudeAt(jd: Double): Double {
+                    longitudeCalls++
+                    return linear.at(jd).longitude
+                }
+            }
+        MotionSearch(counting, step = 1.0, canStation = false).crossings(0.0, 40.0, LongitudeTargets.Grid(30.0))
+        fullCalls shouldBe 0
+        (longitudeCalls > 0) shouldBe true
+    }
+
+    @org.junit.jupiter.api.Test
     fun `stops at the result limit`() {
         shouldThrow<MotionSearch.TooManyResultsException> {
             MotionSearch(linear, step = 1.0, canStation = false).crossings(0.0, 400.0, LongitudeTargets.Grid(1.0), limit = 10)

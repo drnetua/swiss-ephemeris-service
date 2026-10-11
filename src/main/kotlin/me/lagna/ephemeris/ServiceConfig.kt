@@ -17,6 +17,7 @@ import java.time.Instant
  * | `MAX_ITEMS`        | `max.items`  | 10000: instants x bodies, queries, search results    |
  * | `MAX_STREAM_ITEMS` | `max.stream` | 1000000: samples x bodies of one StreamPositions     |
  * | `CACHE_MAX_MB`     | `cache.mb`   | 64; 0 disables the cache                             |
+ * | `SEARCH_WITHOUT_SPEED` | `search.withoutSpeed` | true: crossing searches skip `SEFLG_SPEED`  |
  * | `SOURCE_URL`       | `source.url` | this repository                                      |
  */
 data class ServiceConfig(
@@ -27,6 +28,8 @@ data class ServiceConfig(
     val limits: Limits = Limits(),
     val cacheMaxBytes: Long = DEFAULT_CACHE_MB * MB,
     val sourceUrl: String = DEFAULT_SOURCE_URL,
+    /** Crossing searches compute longitudes without speed; station searches always use speed. */
+    val searchWithoutSpeed: Boolean = true,
 ) {
     data class Limits(
         val maxItems: Int = DEFAULT_MAX_ITEMS,
@@ -43,6 +46,13 @@ data class ServiceConfig(
         const val DEFAULT_CACHE_MB = 64L
         const val DEFAULT_SOURCE_URL = "https://github.com/drnetua/swiss-ephemeris-service"
         private const val MB = 1024L * 1024L
+
+        private fun parseBoolean(value: String): Boolean =
+            when (value.trim().lowercase()) {
+                "true", "1", "yes", "on" -> true
+                "false", "0", "no", "off" -> false
+                else -> error("expected true or false, got '$value'")
+            }
 
         fun fromEnvironment(env: Map<String, String> = System.getenv()): ServiceConfig {
             fun setting(
@@ -67,6 +77,7 @@ data class ServiceConfig(
                     ),
                 cacheMaxBytes = (setting("CACHE_MAX_MB", "cache.mb")?.toLong() ?: DEFAULT_CACHE_MB) * MB,
                 sourceUrl = setting("SOURCE_URL", "source.url") ?: DEFAULT_SOURCE_URL,
+                searchWithoutSpeed = setting("SEARCH_WITHOUT_SPEED", "search.withoutSpeed")?.let(::parseBoolean) ?: true,
             )
         }
     }
