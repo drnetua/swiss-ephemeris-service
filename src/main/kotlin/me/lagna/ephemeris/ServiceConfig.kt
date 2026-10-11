@@ -14,6 +14,7 @@ import java.time.Instant
  * | `SWE_LIB`          | `swe.lib`    | required                                             |
  * | `SWE_EPHE`         | `swe.ephe`   | required                                             |
  * | `SWE_THREADS`      | `swe.threads`| CPU count (1 on macOS)                               |
+ * | `SWE_QUEUE`        | `swe.queue`  | 256 requests waiting for a worker; more get RESOURCE_EXHAUSTED |
  * | `MAX_ITEMS`        | `max.items`  | 10000: instants x bodies, queries, search results    |
  * | `MAX_STREAM_ITEMS` | `max.stream` | 1000000: samples x bodies of one StreamPositions     |
  * | `CACHE_MAX_MB`     | `cache.mb`   | 64; 0 disables the cache                             |
@@ -25,6 +26,7 @@ data class ServiceConfig(
     val library: Path,
     val ephemeris: Path,
     val threads: Int = SweThreads.defaultSize(),
+    val queueCapacity: Int = SweThreads.DEFAULT_QUEUE_CAPACITY,
     val limits: Limits = Limits(),
     val cacheMaxBytes: Long = DEFAULT_CACHE_MB * MB,
     val sourceUrl: String = DEFAULT_SOURCE_URL,
@@ -70,6 +72,7 @@ data class ServiceConfig(
                 library = Path.of(required("SWE_LIB", "swe.lib")),
                 ephemeris = Path.of(required("SWE_EPHE", "swe.ephe")),
                 threads = setting("SWE_THREADS", "swe.threads")?.toInt() ?: SweThreads.defaultSize(),
+                queueCapacity = setting("SWE_QUEUE", "swe.queue")?.toInt() ?: SweThreads.DEFAULT_QUEUE_CAPACITY,
                 limits =
                     Limits(
                         maxItems = setting("MAX_ITEMS", "max.items")?.toInt() ?: DEFAULT_MAX_ITEMS,

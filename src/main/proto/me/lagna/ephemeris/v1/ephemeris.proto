@@ -236,8 +236,9 @@ message CrossingsRequest {
   Zodiac zodiac = 2;
   google.protobuf.Timestamp from = 3;
   google.protobuf.Timestamp to = 4;
-  // Grid of target longitudes: offset_degrees + k * step_degrees.
-  // 30 for signs, 360/27 for nakshatras, 360/108 for padas; or list exact longitudes instead.
+  // Grid of target longitudes: offset_degrees + k * step_degrees, modulo 360. step_degrees must divide
+  // 360 into a whole number of parts (30 for signs, 360/27 for nakshatras, 360/108 for padas), otherwise
+  // INVALID_ARGUMENT. Or list exact longitudes instead.
   oneof targets {
     LongitudeGrid grid = 5;
     LongitudeList list = 6;
@@ -290,4 +291,5 @@ message InfoResponse {
   google.protobuf.Timestamp supported_to = 3;
   uint32 max_items_per_request = 4;          // instants x bodies, queries, ...
   string source_url = 5;                     // AGPL section 13
+  uint64 max_stream_items = 6;               // samples x bodies of one StreamPositions
 }

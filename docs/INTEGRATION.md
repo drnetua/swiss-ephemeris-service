@@ -120,7 +120,7 @@ For one `body`, each query returns the first requested events after its `after` 
 
 ### FindCrossings
 
-Returns every instant between `from` and `to` at which the body's longitude crosses a target, in time order, with the target `longitude` and `retrograde` = true when it crossed moving backwards. Targets are either a `grid` (every `offsetDegrees + k × stepDegrees`: 30 for signs, 13.333… for nakshatras, 3.333… for padas) or a `list` of exact longitudes (e.g. natal points). Limit: 10,000 results; a longer result fails with `INVALID_ARGUMENT`, so narrow the range.
+Returns every instant between `from` and `to` at which the body's longitude crosses a target, in time order, with the target `longitude` and `retrograde` = true when it crossed moving backwards. Targets are either a `grid` (every `offsetDegrees + k × stepDegrees` modulo 360, where `stepDegrees` must divide 360 into whole parts: 30 for signs, 13.333… for nakshatras, 3.333… for padas) or a `list` of exact longitudes (e.g. natal points). Limit: 10,000 results; a longer result fails with `INVALID_ARGUMENT`, so narrow the range.
 
 ```json
 {"body": "SATURN", "from": "2026-01-01T00:00:00Z", "to": "2036-01-01T00:00:00Z",
@@ -133,17 +133,18 @@ Returns every station in the range, in time order: the instant, the longitude an
 
 ### GetInfo
 
-Takes an empty request and returns `engineVersion`, `supportedFrom`, `supportedTo`, `maxItemsPerRequest` and `sourceUrl`. Read the range and limit from here instead of hard-coding them.
+Takes an empty request and returns `engineVersion`, `supportedFrom`, `supportedTo`, `maxItemsPerRequest`, `maxStreamItems` and `sourceUrl`. Read the range and limit from here instead of hard-coding them.
 
 ## Errors and limits
 
-Errors are standard gRPC status codes with a human-readable description; only `UNAVAILABLE` and `DEADLINE_EXCEEDED` are worth retrying.
+Errors are standard gRPC status codes with a human-readable description; only `UNAVAILABLE`, `RESOURCE_EXHAUSTED` and `DEADLINE_EXCEEDED` are worth retrying.
 
 | Status | When | What to do |
 | --- | --- | --- |
-| `INVALID_ARGUMENT` | Missing or unspecified field, bad coordinates, a limit exceeded, too many search results | Fix the request; do not retry |
+| `INVALID_ARGUMENT` | Missing or unspecified field, bad coordinates, a grid step that does not divide 360, a limit exceeded, too many search results | Fix the request; do not retry |
 | `OUT_OF_RANGE` | An instant outside the supported range (`GetInfo`) | Clamp or reject on your side; do not retry |
 | `INTERNAL` | An engine failure that should not happen | Report it with the request; retry once at most |
+| `RESOURCE_EXHAUSTED` | Too many requests are already waiting for a calculation worker | Retry with exponential backoff |
 | `UNAVAILABLE` | Network problem or the service restarting | Retry with exponential backoff; every RPC is idempotent |
 | `DEADLINE_EXCEEDED` | Your deadline passed | Retry with a longer deadline or a narrower range |
 
@@ -154,7 +155,7 @@ Errors are standard gRPC status codes with a human-readable description; only `U
 | Samples × bodies of one `StreamPositions` | 1,000,000 |
 | Message size | 4 MiB (gRPC default), well above the largest response the limits allow |
 
-The operator can change these limits; `GetInfo.maxItemsPerRequest` reports the current one.
+Each deployment can change these limits; `GetInfo` reports the current ones in `maxItemsPerRequest` and `maxStreamItems`.
 
 ## Integration patterns
 

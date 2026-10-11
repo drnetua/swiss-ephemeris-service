@@ -16,7 +16,7 @@ private val log = Logger.getLogger("me.lagna.ephemeris")
 
 fun main() {
     val config = ServiceConfig.fromEnvironment()
-    val ephemeris = SwissEphemeris.open(config.library, config.ephemeris, config.threads)
+    val ephemeris = SwissEphemeris.open(config.library, config.ephemeris, config.threads, config.queueCapacity)
     val cache = if (config.cacheMaxBytes > 0) CaffeineResultCache(config.cacheMaxBytes) else NoopResultCache
     val health = HealthStatusManager()
     val server: Server =

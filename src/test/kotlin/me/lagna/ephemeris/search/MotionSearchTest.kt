@@ -22,7 +22,7 @@ class MotionSearchTest {
 
     @org.junit.jupiter.api.Test
     fun `finds grid crossings across 360 degrees`() {
-        val hits = MotionSearch(linear, stationStep = 1.0, canStation = false).crossings(0.0, 40.0, LongitudeTargets.Grid(30.0))
+        val hits = MotionSearch(linear, stationStep = 1.0, canStation = false).crossings(0.0, 40.0, LongitudeTargets.Grid(12))
         hits.map { it.longitude } shouldBe listOf(0.0, 30.0)
         hits[0].jd shouldBe (5.0 plusOrMinus 1e-5)
         hits[1].jd shouldBe (35.0 plusOrMinus 1e-5)
@@ -70,7 +70,7 @@ class MotionSearchTest {
                     return linear.at(jd).longitude
                 }
             }
-        MotionSearch(counting, stationStep = 1.0, canStation = false).crossings(0.0, 40.0, LongitudeTargets.Grid(30.0))
+        MotionSearch(counting, stationStep = 1.0, canStation = false).crossings(0.0, 40.0, LongitudeTargets.Grid(12))
         fullCalls shouldBe 0
         (longitudeCalls > 0) shouldBe true
     }
@@ -78,8 +78,37 @@ class MotionSearchTest {
     @org.junit.jupiter.api.Test
     fun `stops at the result limit`() {
         shouldThrow<MotionSearch.TooManyResultsException> {
-            MotionSearch(linear, stationStep = 1.0, canStation = false).crossings(0.0, 400.0, LongitudeTargets.Grid(1.0), limit = 10)
+            MotionSearch(linear, stationStep = 1.0, canStation = false).crossings(0.0, 400.0, LongitudeTargets.Grid(360), limit = 10)
         }
+    }
+
+    @org.junit.jupiter.api.Test
+    fun `grids must divide the circle`() {
+        LongitudeTargets.Grid.ofStep(360.0 / 27).divisions shouldBe 27
+        LongitudeTargets.Grid.ofStep(30.0, offset = 15.0).divisions shouldBe 12
+        shouldThrow<IllegalArgumentException> { LongitudeTargets.Grid.ofStep(100.0) }
+        shouldThrow<IllegalArgumentException> { LongitudeTargets.Grid.ofStep(1e-6) }
+    }
+
+    @org.junit.jupiter.api.Test
+    fun `targets are generated lazily in the requested order`() {
+        val grid = LongitudeTargets.Grid(12)
+        grid.valuesIn(350.0, 400.0).map { it.longitude }.toList() shouldBe listOf(0.0, 30.0)
+        grid.valuesIn(350.0, 400.0, descending = true).map { it.value }.toList() shouldBe listOf(390.0, 360.0)
+        // A very fine grid over a wide interval: taking a few must not build them all.
+        LongitudeTargets.Grid(LongitudeTargets.Grid.MAX_DIVISIONS).valuesIn(0.0, 1e9).take(3).count() shouldBe 3
+        val list = LongitudeTargets.Explicit(listOf(-10.0, 370.0, 10.0))
+        list.valuesIn(0.0, 720.0).map { it.value }.toList() shouldBe listOf(10.0, 350.0, 370.0, 710.0)
+        list.valuesIn(0.0, 720.0, descending = true).map { it.value }.toList() shouldBe listOf(710.0, 370.0, 350.0, 10.0)
+    }
+
+    @org.junit.jupiter.api.Test
+    fun `retrograde crossings within one sample come back in time order`() {
+        val search = MotionSearch(looping, stationStep = 0.5, canStation = true, crossingStep = 5.0)
+        val inLoop = (1..9).map { looping.at(9.0 + it * 0.2).longitude }
+        val hits = search.crossings(0.0, 20.0, LongitudeTargets.Explicit(inLoop)).filter { it.retrograde }
+        hits.map { it.jd } shouldBe hits.map { it.jd }.sorted()
+        hits shouldHaveSize 9
     }
 
     @org.junit.jupiter.api.Test

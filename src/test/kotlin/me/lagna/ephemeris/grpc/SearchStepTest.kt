@@ -21,7 +21,7 @@ import org.junit.jupiter.params.provider.ValueSource
 class SearchStepTest {
     private val from = JulianDay.of(timestamp("2000-01-01T00:00:00Z"))
     private val to = JulianDay.of(timestamp("2040-01-01T00:00:00Z"))
-    private val padas = LongitudeTargets.Grid(360.0 / 108)
+    private val padas = LongitudeTargets.Grid(108)
 
     @ParameterizedTest
     @ValueSource(ints = [SweConstants.SE_MERCURY, SweConstants.SE_VENUS, SweConstants.SE_MARS, SweConstants.SE_JUPITER, SweConstants.SE_CHIRON])

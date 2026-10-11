@@ -49,6 +49,7 @@ Environment variables (system properties in brackets, used by Gradle runs and te
 | `SWE_LIB`          | required (`swe.lib`)          | Path to `libswe.so` / `libswe.dylib`                    |
 | `SWE_EPHE`         | required (`swe.ephe`)         | Directory with the `.se1` files                         |
 | `SWE_THREADS`      | CPU count (1 on macOS)        | libswe worker threads                                   |
+| `SWE_QUEUE`        | `256`                         | Requests waiting for a worker; more get `RESOURCE_EXHAUSTED` |
 | `MAX_ITEMS`        | `10000`                       | Limit per request: instants × bodies, queries, results  |
 | `MAX_STREAM_ITEMS` | `1000000`                     | Limit per stream: samples × bodies                      |
 | `CACHE_MAX_MB`     | `64`                          | In-process cache of search results; `0` disables it     |

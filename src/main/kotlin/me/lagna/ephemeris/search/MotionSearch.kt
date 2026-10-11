@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 package me.lagna.ephemeris.search
 
+import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.floor
 
@@ -32,45 +33,131 @@ data class CrossingHit(
     val retrograde: Boolean,
 )
 
-/** Longitudes a body is searched for: a regular grid or an explicit list, both taken modulo 360. */
+/** A target longitude: [value] unwrapped onto the search interval, [longitude] the same angle in [0, 360). */
+data class Target(
+    val value: Double,
+    val longitude: Double,
+)
+
+/** Longitudes a body is searched for: a regular division of the circle or an explicit list. */
 sealed interface LongitudeTargets {
-    /** Target values v with [lower] <= v <= [upper] (unwrapped, [lower] < [upper]). */
+    /**
+     * Targets with [lower] <= value <= [upper] (unwrapped, [lower] < [upper]), generated lazily in ascending order,
+     * or descending when [descending], so callers can stop early and keep hits in the order the body meets them.
+     */
     fun valuesIn(
         lower: Double,
         upper: Double,
-    ): List<Double>
+        descending: Boolean = false,
+    ): Sequence<Target>
 
-    data class Grid(
-        val step: Double,
-        val offset: Double = 0.0,
+    /** [divisions] equal parts of the circle, the first at [offset]: 12 for signs, 27 for nakshatras, 108 for padas. */
+    class Grid(
+        val divisions: Int,
+        offset: Double = 0.0,
     ) : LongitudeTargets {
+        val step: Double = FULL_CIRCLE / divisions
+
+        /** The offset folded into [0, step), so target i of each turn is `start + i * step`, ascending, below 360. */
+        private val start: Double
+
         init {
-            require(step > 0.0 && step <= FULL_CIRCLE) { "step must be in (0, 360]" }
+            require(divisions in 1..MAX_DIVISIONS) { "divisions must be in 1..$MAX_DIVISIONS" }
+            require(offset.isFinite()) { "offset must be finite" }
+            start = ((offset % step) + step) % step
         }
 
         override fun valuesIn(
             lower: Double,
             upper: Double,
-        ): List<Double> {
-            val first = ceil((lower - offset) / step).toLong()
-            val last = floor((upper - offset) / step).toLong()
-            return (first..last).map { offset + it * step }
+            descending: Boolean,
+        ): Sequence<Target> {
+            var first = ceil((lower - start) / step).toLong()
+            while (value(first) < lower) first++
+            while (value(first - 1) >= lower) first--
+            var last = floor((upper - start) / step).toLong()
+            while (value(last) > upper) last--
+            while (value(last + 1) <= upper) last++
+            val indices = if (descending) (last downTo first).asSequence() else (first..last).asSequence()
+            return indices.map { k -> Target(value(k), longitude(k)) }
+        }
+
+        private fun longitude(k: Long): Double = start + Math.floorMod(k, divisions.toLong()) * step
+
+        private fun value(k: Long): Double = Math.floorDiv(k, divisions.toLong()) * FULL_CIRCLE + longitude(k)
+
+        companion object {
+            /** About one division per arcsecond; results are capped per request anyway. */
+            const val MAX_DIVISIONS = 1_296_000
+
+            /** A grid from a step in degrees, which must divide the circle into a whole number of parts. */
+            fun ofStep(
+                stepDegrees: Double,
+                offset: Double = 0.0,
+            ): Grid {
+                require(stepDegrees > 0.0 && stepDegrees <= FULL_CIRCLE) { "step must be in (0, 360]" }
+                val parts = FULL_CIRCLE / stepDegrees
+                val divisions = Math.round(parts)
+                require(divisions <= MAX_DIVISIONS && abs(parts - divisions) <= DIVISION_TOLERANCE * parts) {
+                    "step must divide 360 into a whole number of parts of at least 1 arcsecond (30, 360/27, ...)"
+                }
+                return Grid(divisions.toInt(), offset)
+            }
+
+            private const val DIVISION_TOLERANCE = 1e-9
         }
     }
 
-    data class Explicit(
-        val longitudes: List<Double>,
+    /** Explicit longitudes, folded into [0, 360), deduplicated and sorted once, then picked by binary search. */
+    class Explicit(
+        longitudes: Collection<Double>,
     ) : LongitudeTargets {
+        private val sorted: DoubleArray =
+            longitudes
+                .onEach { require(it.isFinite()) { "longitudes must be finite" } }
+                .map { MotionSearch.normalize(it) }
+                .distinct()
+                .sorted()
+                .toDoubleArray()
+
         override fun valuesIn(
             lower: Double,
             upper: Double,
-        ): List<Double> =
-            longitudes
-                .flatMap { g ->
-                    val first = ceil((lower - g) / FULL_CIRCLE).toLong()
-                    val last = floor((upper - g) / FULL_CIRCLE).toLong()
-                    (first..last).map { g + it * FULL_CIRCLE }
-                }.sorted()
+            descending: Boolean,
+        ): Sequence<Target> {
+            val firstTurn = floor(lower / FULL_CIRCLE).toLong()
+            val lastTurn = floor(upper / FULL_CIRCLE).toLong()
+            val turns = if (descending) (lastTurn downTo firstTurn).asSequence() else (firstTurn..lastTurn).asSequence()
+            return turns.flatMap { turn ->
+                val base = turn * FULL_CIRCLE
+                val from = lowerBound(lower - base)
+                val to = upperBound(upper - base)
+                val indices = if (descending) (to - 1 downTo from).asSequence() else (from until to).asSequence()
+                indices.map { Target(base + sorted[it], sorted[it]) }
+            }
+        }
+
+        /** First index with sorted[i] >= x. */
+        private fun lowerBound(x: Double): Int {
+            var lo = 0
+            var hi = sorted.size
+            while (lo < hi) {
+                val mid = (lo + hi) ushr 1
+                if (sorted[mid] < x) lo = mid + 1 else hi = mid
+            }
+            return lo
+        }
+
+        /** First index with sorted[i] > x. */
+        private fun upperBound(x: Double): Int {
+            var lo = 0
+            var hi = sorted.size
+            while (lo < hi) {
+                val mid = (lo + hi) ushr 1
+                if (sorted[mid] <= x) lo = mid + 1 else hi = mid
+            }
+            return lo
+        }
     }
 }
 
@@ -137,11 +224,12 @@ class MotionSearch(
             if (delta != 0.0) {
                 val lower = minOf(longitudeA, longitudeA + delta)
                 val upper = maxOf(longitudeA, longitudeA + delta)
-                for (value in targets.valuesIn(lower, upper)) {
-                    if (value == longitudeA) continue // counted in the previous interval
+                // Targets come in the order the body meets them: descending while it moves backwards.
+                for (target in targets.valuesIn(lower, upper, descending = delta < 0.0)) {
+                    if (target.value == longitudeA) continue // counted in the previous interval
                     if (hits.size == limit) throw TooManyResultsException(limit)
-                    val target = normalize(value)
-                    hits += CrossingHit(refineCrossing(a, c, longitudeA, target), target, retrograde = delta < 0.0)
+                    val longitude = target.longitude
+                    hits += CrossingHit(refineCrossing(a, c, longitudeA, longitude), longitude, retrograde = delta < 0.0)
                 }
             }
             a = c

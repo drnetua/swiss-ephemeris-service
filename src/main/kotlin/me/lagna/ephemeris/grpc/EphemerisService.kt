@@ -44,6 +44,7 @@ import me.lagna.ephemeris.v1.StationsRequest
 import me.lagna.ephemeris.v1.StationsResponse
 import java.time.DateTimeException
 import java.time.Instant
+import java.util.concurrent.RejectedExecutionException
 import java.util.logging.Level
 import java.util.logging.Logger
 import me.lagna.ephemeris.v1.Body as ProtoBody
@@ -134,6 +135,7 @@ class EphemerisService(
             val frame = ProtoMapping.frame(request.zodiac, request.hasZodiac())
             val queries =
                 request.queriesList.map { query ->
+                    if (!query.hasInstant()) invalid("every query needs an instant")
                     if (!query.hasLocation()) invalid("every query needs a location")
                     julianDay(query.instant) to ProtoMapping.place(query.location)
                 }
@@ -163,6 +165,7 @@ class EphemerisService(
             val body = ProtoMapping.body(request.body)
             val queries =
                 request.queriesList.map { query ->
+                    if (!query.hasAfter()) invalid("every query needs an after instant")
                     if (!query.hasLocation()) invalid("every query needs a location")
                     requireNotEmpty(query.eventsCount, "events")
                     val modes = query.eventsList.map { it to ProtoMapping.riseSetMode(it, request.convention) }
@@ -237,6 +240,7 @@ class EphemerisService(
             .setSupportedFrom(timestamp(limits.supportedFrom))
             .setSupportedTo(timestamp(limits.supportedTo))
             .setMaxItemsPerRequest(limits.maxItems)
+            .setMaxStreamItems(limits.maxStreamItems)
             .setSourceUrl(sourceUrl)
             .build()
 
@@ -301,7 +305,11 @@ class EphemerisService(
                 val grid = request.grid
                 if (!(grid.stepDegrees > 0.0 && grid.stepDegrees <= FULL_CIRCLE)) invalid("step_degrees must be in (0, 360]")
                 if (!grid.offsetDegrees.isFinite()) invalid("offset_degrees must be finite")
-                LongitudeTargets.Grid(grid.stepDegrees, grid.offsetDegrees)
+                try {
+                    LongitudeTargets.Grid.ofStep(grid.stepDegrees, grid.offsetDegrees)
+                } catch (e: IllegalArgumentException) {
+                    invalid("step_degrees: ${e.message}")
+                }
             }
 
             CrossingsRequest.TargetsCase.LIST -> {
@@ -309,7 +317,7 @@ class EphemerisService(
                 requireNotEmpty(longitudes.size, "longitudes")
                 requireWithinLimit(longitudes.size.toLong(), "longitudes")
                 if (longitudes.any { !it.isFinite() }) invalid("longitudes must be finite")
-                LongitudeTargets.Explicit(longitudes.map { MotionSearch.normalize(it) }.distinct())
+                LongitudeTargets.Explicit(longitudes)
             }
 
             CrossingsRequest.TargetsCase.TARGETS_NOT_SET -> invalid("set grid or list")
@@ -370,6 +378,8 @@ class EphemerisService(
             throw status(Status.INVALID_ARGUMENT, e.message)
         } catch (e: OutOfRangeException) {
             throw status(Status.OUT_OF_RANGE, e.message)
+        } catch (e: RejectedExecutionException) {
+            throw status(Status.RESOURCE_EXHAUSTED, "the service is busy; retry with backoff")
         } catch (e: EphemerisException) {
             log.log(Level.WARNING, "libswe call failed", e)
             throw status(Status.INTERNAL, e.message)

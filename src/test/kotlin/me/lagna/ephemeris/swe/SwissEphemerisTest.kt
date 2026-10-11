@@ -15,6 +15,7 @@ import me.lagna.ephemeris.TestEphemeris
 import me.lagna.ephemeris.timestamp
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
+import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.math.abs
 
@@ -99,6 +100,18 @@ class SwissEphemerisTest {
     @Test
     fun `version names the engine`() {
         ephemeris.version shouldStartWith "Swiss Ephemeris 2.10"
+    }
+
+    @Test
+    fun `startup fails when the asteroid file for Chiron is missing`(
+        @TempDir partial: Path,
+    ) {
+        for (file in listOf("sepl_18.se1", "semo_18.se1")) {
+            Files.copy(TestEphemeris.epheDirectory.resolve(file), partial.resolve(file))
+        }
+        val error = shouldThrow<EphemerisException> { SwissEphemeris.open(TestEphemeris.library, partial, threads = 1) }
+        error.message shouldContain "self-check failed"
+        error.cause?.message.orEmpty() shouldContain "seas_18"
     }
 
     @Test

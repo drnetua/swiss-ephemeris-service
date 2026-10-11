@@ -20,6 +20,7 @@ import me.lagna.ephemeris.cache.NoopResultCache
 import me.lagna.ephemeris.timestamp
 import me.lagna.ephemeris.toInstant
 import me.lagna.ephemeris.v1.Ayanamsa
+import me.lagna.ephemeris.v1.AyanamsaRequest
 import me.lagna.ephemeris.v1.Body
 import me.lagna.ephemeris.v1.CrossingsRequest
 import me.lagna.ephemeris.v1.EphemerisGrpcKt
@@ -296,11 +297,98 @@ class EphemerisServiceTest {
     }
 
     @Test
+    fun `ayanamsa matches swetest`() {
+        runBlocking {
+            val lahiri =
+                client.getAyanamsa(
+                    AyanamsaRequest
+                        .newBuilder()
+                        .addInstants(timestamp("2000-01-01T12:00:00Z"))
+                        .setAyanamsa(Ayanamsa.LAHIRI)
+                        .build(),
+                )
+            // swetest -b1.1.2000 -ut12:00 -ay1: 23°51'11.6009"
+            lahiri.getDegrees(0) shouldBe (23.853222472 plusOrMinus 1e-6)
+            val raman =
+                client.getAyanamsa(
+                    AyanamsaRequest
+                        .newBuilder()
+                        .addInstants(timestamp("2024-01-01T00:00:00Z"))
+                        .setAyanamsa(Ayanamsa.RAMAN)
+                        .build(),
+                )
+            // swetest -b1.1.2024 -ut0:00 -ay3: 22°44'40.3949"
+            raman.getDegrees(0) shouldBe (22.744554139 plusOrMinus 1e-6)
+            val unspecified =
+                shouldThrow<StatusException> {
+                    client.getAyanamsa(AyanamsaRequest.newBuilder().addInstants(timestamp("2000-01-01T12:00:00Z")).build())
+                }
+            unspecified.status.code shouldBe Status.Code.INVALID_ARGUMENT
+        }
+    }
+
+    @Test
+    fun `queries without their instant are rejected`() {
+        runBlocking {
+            val houses =
+                shouldThrow<StatusException> {
+                    client.getHouses(
+                        HousesRequest
+                            .newBuilder()
+                            .setSystem(HouseSystem.WHOLE_SIGN)
+                            .addQueries(HouseQuery.newBuilder().setLocation(kyiv))
+                            .build(),
+                    )
+                }
+            houses.status.code shouldBe Status.Code.INVALID_ARGUMENT
+            val riseSet =
+                shouldThrow<StatusException> {
+                    client.getRiseSet(
+                        RiseSetRequest
+                            .newBuilder()
+                            .setBody(Body.SUN)
+                            .addQueries(RiseSetQuery.newBuilder().setLocation(kyiv).addEvents(RiseSetEvent.RISE))
+                            .build(),
+                    )
+                }
+            riseSet.status.code shouldBe Status.Code.INVALID_ARGUMENT
+        }
+    }
+
+    @Test
+    fun `a grid step that does not divide 360 is rejected`() {
+        runBlocking {
+            val error =
+                shouldThrow<StatusException> {
+                    client.findCrossings(crossings(Body.SUN, "2024-01-01T00:00:00Z", "2025-01-01T00:00:00Z", 100.0, null))
+                }
+            error.status.code shouldBe Status.Code.INVALID_ARGUMENT
+        }
+    }
+
+    @Test
+    fun `dense crossings during a retrograde come back in time order`() {
+        runBlocking {
+            // Every arcminute while Mercury retrogrades about 15 degrees: many targets per daily sample.
+            val crossings =
+                client
+                    .findCrossings(
+                        crossings(Body.MERCURY, "2024-04-02T00:00:00Z", "2024-04-25T00:00:00Z", 1.0 / 60, null),
+                    ).crossingsList
+            (crossings.size > 500) shouldBe true
+            crossings.all { it.retrograde } shouldBe true
+            val instants = crossings.map { it.instant.toInstant() }
+            instants shouldBe instants.sorted()
+        }
+    }
+
+    @Test
     fun `info names the engine and the source`() {
         runBlocking {
             val info = client.getInfo(InfoRequest.getDefaultInstance())
             info.sourceUrl shouldBe "https://github.com/drnetua/swiss-ephemeris-service"
             info.engineVersion.startsWith("Swiss Ephemeris") shouldBe true
+            info.maxStreamItems shouldBe 1_000_000L
         }
     }
 

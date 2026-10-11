@@ -36,6 +36,7 @@ class SwissEphemeris internal constructor(
     companion object {
         /** J2000.0, a date every bundled ephemeris file covers. */
         private const val SELF_CHECK_JD = 2451545.0
+        private val SELF_CHECK_BODIES = listOf(SweConstants.SE_SUN, SweConstants.SE_MOON, SweConstants.SE_CHIRON)
 
         /**
          * Opens libswe and fails fast when the library or the `.se1` files are unusable, so the service never
@@ -45,15 +46,17 @@ class SwissEphemeris internal constructor(
             library: Path,
             epheDirectory: Path,
             threads: Int = SweThreads.defaultSize(),
+            queueCapacity: Int = SweThreads.DEFAULT_QUEUE_CAPACITY,
         ): SwissEphemeris {
             if (!Files.isRegularFile(library)) throw EphemerisException("libswe not found at $library")
             if (!Files.isDirectory(epheDirectory)) {
                 throw EphemerisException("ephemeris directory not found: $epheDirectory")
             }
             val native = SweNative(library)
-            val ephemeris = SwissEphemeris(native, SweThreads(threads) { native.setEphePath(epheDirectory) })
+            val ephemeris = SwissEphemeris(native, SweThreads(threads, queueCapacity) { native.setEphePath(epheDirectory) })
             try {
-                ephemeris.sessionBlocking { position(SELF_CHECK_JD, SweConstants.SE_MOON) }
+                // One body per bundled file: planets (sepl), the Moon (semo) and Chiron (seas).
+                ephemeris.sessionBlocking { SELF_CHECK_BODIES.forEach { position(SELF_CHECK_JD, it) } }
             } catch (e: EphemerisException) {
                 ephemeris.close()
                 throw EphemerisException("Swiss Ephemeris self-check failed with files in $epheDirectory", e)
