@@ -11,10 +11,16 @@ import me.lagna.ephemeris.cache.NoopResultCache
 import me.lagna.ephemeris.grpc.EphemerisService
 import me.lagna.ephemeris.swe.SwissEphemeris
 import java.util.logging.Logger
+import kotlin.system.exitProcess
 
 private val log = Logger.getLogger("me.lagna.ephemeris")
 
-fun main() {
+fun main(args: Array<String>) {
+    if (args.firstOrNull() == "healthcheck") exitProcess(HealthProbe.run(args.drop(1)))
+    serve()
+}
+
+private fun serve() {
     val config = ServiceConfig.fromEnvironment()
     val ephemeris = SwissEphemeris.open(config.library, config.ephemeris, config.threads, config.queueCapacity)
     val cache = if (config.cacheMaxBytes > 0) CaffeineResultCache(config.cacheMaxBytes) else NoopResultCache

@@ -46,3 +46,25 @@ jobs:
         with:
           name: test-reports
           path: build/reports/tests/
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/setup-buildx-action@v3
+      - name: Build and start
+        run: docker compose up -d --build --wait --wait-timeout 180 ephemeris
+      - name: Call GetInfo from a client container
+        run: |
+          out=$(docker compose run --rm grpcurl)
+          echo "$out"
+          echo "$out" | grep -q '"engineVersion": "Swiss Ephemeris 2.10'
+          echo "::notice title=docker::$(docker image inspect swiss-ephemeris-service:local --format '{{.Size}}' | awk '{printf "image %.0f MB", $1/1000000}')"
+      - name: Container logs
+        if: failure()
+        run: |
+          docker compose logs --no-log-prefix ephemeris
+          docker compose logs --no-log-prefix ephemeris | tail -n 10 | sed 's/^/::error title=container::/'
+      - name: Stop
+        if: always()
+        run: docker compose down

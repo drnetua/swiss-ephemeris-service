@@ -1,0 +1,53 @@
+# syntax=docker/dockerfile:1.7
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Example image: libswe and the .se1 files built from the pinned, checksum-verified sources, the service on a
+# JRE, a non-root user and a gRPC health check. Adapt it to your registry and platform as needed.
+#
+#   docker build -t swiss-ephemeris-service .
+#   docker run --rm -p 50051:50051 swiss-ephemeris-service
+
+ARG JDK_IMAGE=eclipse-temurin:25-jdk-noble
+ARG JRE_IMAGE=eclipse-temurin:25-jre-noble
+
+# --- 1. libswe and the ephemeris files, on the same Ubuntu release as the runtime image ---------------------
+FROM ${JDK_IMAGE} AS native
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends gcc libc6-dev curl ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+WORKDIR /src
+COPY native/ native/
+RUN --mount=type=cache,id=swisseph,target=/swe-cache \
+    SWE_CACHE=/swe-cache sh native/build-libswe.sh /out
+
+# --- 2. The service, as a Gradle application distribution -------------------------------------------------
+FROM ${JDK_IMAGE} AS app
+WORKDIR /src
+COPY gradlew settings.gradle.kts build.gradle.kts ./
+COPY gradle/ gradle/
+RUN --mount=type=cache,target=/root/.gradle ./gradlew --no-daemon --quiet --version
+COPY src/ src/
+# Tests run in CI; add `test` here (it needs gcc and curl in this stage) to run them in the image build too.
+RUN --mount=type=cache,target=/root/.gradle ./gradlew --no-daemon installDist
+
+# --- 3. Runtime -------------------------------------------------------------------------------------------
+FROM ${JRE_IMAGE}
+LABEL org.opencontainers.image.title="swiss-ephemeris-service" \
+      org.opencontainers.image.description="Stateless gRPC ephemeris service built on the Swiss Ephemeris" \
+      org.opencontainers.image.source="https://github.com/drnetua/swiss-ephemeris-service" \
+      org.opencontainers.image.licenses="AGPL-3.0-or-later"
+
+COPY --from=native /out/lib/libswe.so /opt/swe/lib/libswe.so
+COPY --from=native /out/ephe/ /opt/swe/ephe/
+COPY --from=app /src/build/install/swiss-ephemeris-service/ /app/
+
+ENV SWE_LIB=/opt/swe/lib/libswe.so \
+    SWE_EPHE=/opt/swe/ephe \
+    PORT=50051 \
+    JAVA_OPTS="-XX:MaxRAMPercentage=75"
+
+USER 10001:10001
+EXPOSE 50051
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD ["/app/bin/swiss-ephemeris-service", "healthcheck"]
+ENTRYPOINT ["/app/bin/swiss-ephemeris-service"]

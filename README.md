@@ -39,6 +39,21 @@ grpcurl -plaintext -d '{"instants":["2000-01-01T12:00:00Z"],"bodies":["SUN","MOO
 
 Server reflection and the standard gRPC health service are enabled.
 
+## Run with Docker
+
+[`Dockerfile`](Dockerfile) and [`compose.yaml`](compose.yaml) are working examples: the image builds libswe and
+the `.se1` files from the pinned sources, runs as a non-root user on a JRE and checks its own health over gRPC
+(`swiss-ephemeris-service healthcheck`).
+
+```bash
+docker compose up -d --build     # healthy once the startup self-check has passed
+docker compose run --rm grpcurl  # GetInfo from a client container on the same network
+docker compose down
+```
+
+Configure the container with the environment variables below. TLS, public addresses and scaling are left to
+your deployment.
+
 ## Configuration
 
 Environment variables (system properties in brackets, used by Gradle runs and tests):
