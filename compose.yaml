@@ -25,7 +25,7 @@ services:
       # SOURCE_URL: https://example.org/your-fork   # set it if you run a modified version (AGPL section 13)
     read_only: true
     tmpfs:
-      - /tmp
+      - /tmp:exec,size=64m                  # exec: netty loads its native epoll transport from /tmp
     cap_drop:
       - ALL
     security_opt:

@@ -56,9 +56,12 @@ jobs:
         run: docker compose up -d --build --wait --wait-timeout 180 ephemeris
       - name: Call GetInfo from a client container
         run: |
-          out=$(docker compose run --rm grpcurl)
+          if ! out=$(docker compose run --rm -T grpcurl 2>&1) || ! echo "$out" | grep -q '"engineVersion": "Swiss Ephemeris 2.10'; then
+            echo "$out"
+            echo "$out" | tail -n 8 | sed 's/^/::error title=grpcurl::/'
+            exit 1
+          fi
           echo "$out"
-          echo "$out" | grep -q '"engineVersion": "Swiss Ephemeris 2.10'
           echo "::notice title=docker::$(docker image inspect swiss-ephemeris-service:local --format '{{.Size}}' | awk '{printf "image %.0f MB", $1/1000000}')"
       - name: Container logs
         if: failure()
