@@ -1,0 +1,4 @@
+# Pinned Swiss Ephemeris sources (https://github.com/aloistr/swisseph), tag v2.10.3bfinal.
+# SE_VERSION 2.10.03 (2.10.03b, DE441-based). AGPL-3.0 / Swiss Ephemeris Professional License.
+# Per-file SHA-256 of everything fetched at this commit: swisseph.sha256.
+SWE_COMMIT=f4dcd18e8005dde95fd8a8d2312ed12f9accd1b0
