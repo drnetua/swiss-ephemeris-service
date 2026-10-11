@@ -1,13 +1,25 @@
 name: Release
 
-# Publishing a GitHub release (tag vX.Y.Z) builds, tests and attaches:
-#   swiss-ephemeris-service-linux-amd64.tar.gz, swiss-ephemeris-service-linux-arm64.tar.gz, SHA256SUMS
-# Each archive holds the application (bin/, lib/), libswe for that platform (native/), the .se1 files (ephe/),
-# LICENSE and README.md; bin/swiss-ephemeris-service finds native/ and ephe/ by itself and needs a JRE 25.
+# Builds, tests and packages a release, and publishes the GitHub release only once everything has passed, so
+# `releases/latest` never points at a release without its files. Start it either way:
+#   - push a tag:        git tag v0.1.0 && git push origin v0.1.0
+#   - or run it by hand: Actions → Release → Run workflow, tag v0.1.0 (tags the commit the run is on)
+# Assets: swiss-ephemeris-service-linux-amd64.tar.gz, swiss-ephemeris-service-linux-arm64.tar.gz, SHA256SUMS.
+# Each archive holds the application (bin/, lib/), libswe for that platform (native/, built on Ubuntu 22.04, so
+# glibc 2.35 or newer), the .se1 files (ephe/), LICENSE and README.md; it needs a JRE 25.
 
 on:
-  release:
-    types: [published]
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag, vX.Y.Z (a suffix such as -rc.1 makes a pre-release)"
+        required: true
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -15,21 +27,31 @@ permissions:
 jobs:
   app:
     runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v5
+      - name: Check the tag
+        id: version
+        env:
+          TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$' \
+            || { echo "::error::tag '$TAG' is not vX.Y.Z"; exit 1; }
+          if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            echo "::error::release $TAG already exists"; exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "25"
       - uses: gradle/actions/setup-gradle@v5
-      - name: Version from the tag
-        run: |
-          tag="${{ github.event.release.tag_name }}"
-          version="${tag#v}"
-          echo "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.]+)?$' || { echo "::error::tag $tag is not vX.Y.Z"; exit 1; }
-          echo "VERSION=$version" >> "$GITHUB_ENV"
       - name: Build, test and assemble
-        run: ./gradlew build installDist -PreleaseVersion="$VERSION" --stacktrace
+        run: ./gradlew build installDist -PreleaseVersion="${{ steps.version.outputs.version }}" --stacktrace
       - uses: actions/upload-artifact@v4
         with:
           name: app
@@ -41,9 +63,9 @@ jobs:
       matrix:
         include:
           - arch: amd64
-            runner: ubuntu-24.04
+            runner: ubuntu-22.04
           - arch: arm64
-            runner: ubuntu-24.04-arm
+            runner: ubuntu-22.04-arm
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v5
@@ -67,7 +89,7 @@ jobs:
           path: swiss-ephemeris-service-linux-${{ matrix.arch }}.tar.gz
 
   publish:
-    needs: package
+    needs: [app, package]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -76,31 +98,37 @@ jobs:
         with:
           pattern: archive-*
           merge-multiple: true
-      - name: Attach to the release
+      - name: Publish the release with its files
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.app.outputs.tag }}
         run: |
           sha256sum swiss-ephemeris-service-linux-*.tar.gz > SHA256SUMS
           cat SHA256SUMS
-          gh release upload "${{ github.event.release.tag_name }}" swiss-ephemeris-service-linux-*.tar.gz SHA256SUMS \
-            --clobber --repo "${{ github.repository }}"
+          flags="--title $TAG --generate-notes"
+          if [ "${{ github.event_name }}" = push ]; then flags="$flags --verify-tag"; else flags="$flags --target ${{ github.sha }}"; fi
+          case "$TAG" in *-*) flags="$flags --prerelease" ;; esac
+          # shellcheck disable=SC2086
+          gh release create "$TAG" swiss-ephemeris-service-linux-*.tar.gz SHA256SUMS $flags --repo "${{ github.repository }}"
 
   docker:
-    needs: publish
+    needs: [app, publish]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
       - uses: docker/setup-buildx-action@v3
       - name: Build the release image with compose and start it
         env:
-          RELEASE: download/${{ github.event.release.tag_name }}
+          RELEASE: download/${{ needs.app.outputs.tag }}
         run: docker compose up -d --build --wait --wait-timeout 180 ephemeris
       - name: Check the running version
+        env:
+          VERSION: ${{ needs.app.outputs.version }}
         run: |
-          tag="${{ github.event.release.tag_name }}"
           out=$(docker compose run --rm -T grpcurl 2>&1) || { echo "$out"; exit 1; }
           echo "$out"
-          echo "$out" | grep -qE "\"(service_version|serviceVersion)\": \"${tag#v}\"" || { echo "::error::GetInfo does not report ${tag#v}"; exit 1; }
+          echo "$out" | grep -qE "\"(service_version|serviceVersion)\": \"$VERSION\"" \
+            || { echo "::error::GetInfo does not report $VERSION"; exit 1; }
       - name: Stop
         if: always()
         run: docker compose down

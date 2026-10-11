@@ -43,7 +43,9 @@ Server reflection and the standard gRPC health service are enabled.
 
 Each [GitHub release](https://github.com/drnetua/swiss-ephemeris-service/releases) carries
 `swiss-ephemeris-service-linux-amd64.tar.gz`, `swiss-ephemeris-service-linux-arm64.tar.gz` and `SHA256SUMS`.
-An archive holds the application, libswe for its platform and the `.se1` files; it needs only a JRE 25:
+An archive holds the application, libswe for its platform and the `.se1` files. It needs a JRE 25 on a
+glibc-based Linux with glibc 2.35 or newer (Ubuntu 22.04+, Debian 12+, RHEL 10+); musl distributions such as
+Alpine are not supported:
 
 ```bash
 tar -xzf swiss-ephemeris-service-linux-amd64.tar.gz
@@ -52,6 +54,11 @@ swiss-ephemeris-service/bin/swiss-ephemeris-service healthcheck  # exit 0 when s
 ```
 
 `GetInfo` reports the running release in `service_version`.
+
+Maintainers release by pushing a tag (`git tag v0.1.0 && git push origin v0.1.0`) or by running the **Release**
+workflow with a tag. The workflow builds, tests and smoke-tests both archives and publishes the GitHub release
+only after all of that passes, so `releases/latest` never lacks its files; a tag with a suffix such as `-rc.1`
+becomes a pre-release.
 
 ## Run with Docker
 
