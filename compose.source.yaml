@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Override for compose.yaml: build the image from the sources in this checkout instead of a release.
+#
+#   docker compose -f compose.yaml -f compose.source.yaml up -d --build
+
+services:
+  ephemeris:
+    build:
+      dockerfile: Dockerfile.source
+    pull_policy: missing
+    image: swiss-ephemeris-service:source

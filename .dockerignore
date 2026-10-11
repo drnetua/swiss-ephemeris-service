@@ -1,0 +1,8 @@
+# Only what the image build needs: the native sources lock, the Gradle build and the code.
+*
+!native/
+!gradle/
+!gradlew
+!settings.gradle.kts
+!build.gradle.kts
+!src/

@@ -6,7 +6,8 @@ plugins {
 }
 
 group = "me.lagna"
-version = "0.1.0-SNAPSHOT"
+// Releases pass -PreleaseVersion=<x.y.z>; the jar manifest carries it and GetInfo reports it.
+version = (findProperty("releaseVersion") as String?) ?: "0.1.0-SNAPSHOT"
 
 kotlin {
     jvmToolchain(25)
@@ -90,6 +91,10 @@ tasks.register<Test>("perfTest") {
     systemProperty("perf.out", layout.buildDirectory.file("perf/results.txt").get().asFile.absolutePath)
     outputs.upToDateWhen { false }
     testLogging { showStandardStreams = true }
+}
+
+tasks.jar {
+    manifest { attributes("Implementation-Title" to project.name, "Implementation-Version" to project.version) }
 }
 
 application {

@@ -39,6 +39,44 @@ grpcurl -plaintext -d '{"instants":["2000-01-01T12:00:00Z"],"bodies":["SUN","MOO
 
 Server reflection and the standard gRPC health service are enabled.
 
+## Releases
+
+Each [GitHub release](https://github.com/drnetua/swiss-ephemeris-service/releases) carries
+`swiss-ephemeris-service-linux-amd64.tar.gz`, `swiss-ephemeris-service-linux-arm64.tar.gz` and `SHA256SUMS`.
+An archive holds the application, libswe for its platform and the `.se1` files. It needs a JRE 25 on a
+glibc-based Linux with glibc 2.35 or newer (Ubuntu 22.04+, Debian 12+, RHEL 10+); musl distributions such as
+Alpine are not supported:
+
+```bash
+tar -xzf swiss-ephemeris-service-linux-amd64.tar.gz
+swiss-ephemeris-service/bin/swiss-ephemeris-service              # gRPC on :50051
+swiss-ephemeris-service/bin/swiss-ephemeris-service healthcheck  # exit 0 when serving
+```
+
+`GetInfo` reports the running release in `service_version`.
+
+Maintainers release by pushing a tag (`git tag v0.1.0 && git push origin v0.1.0`) or by running the **Release**
+workflow with a tag. The workflow builds, tests and smoke-tests both archives and publishes the GitHub release
+only after all of that passes, so `releases/latest` never lacks its files; a tag with a suffix such as `-rc.1`
+becomes a pre-release.
+
+## Run with Docker
+
+[`Dockerfile`](Dockerfile) downloads the latest release archive for the build platform, checks it against
+`SHA256SUMS` and runs it as a non-root user on a JRE with a gRPC health check. [`compose.yaml`](compose.yaml)
+re-checks the latest release on every `up` and rebuilds only when it changed:
+
+```bash
+docker compose up -d                     # the latest release; healthy once the self-check has passed
+RELEASE=download/v0.1.0 docker compose up -d --build   # a pinned release
+docker compose run --rm grpcurl          # GetInfo from a client container on the same network
+docker compose down
+```
+
+To build from this checkout's sources instead: `docker compose -f compose.yaml -f compose.source.yaml up -d --build`
+([`Dockerfile.source`](Dockerfile.source)). Configure the container with the environment variables below;
+TLS, public addresses and scaling are left to your deployment.
+
 ## Configuration
 
 Environment variables (system properties in brackets, used by Gradle runs and tests):
@@ -46,8 +84,8 @@ Environment variables (system properties in brackets, used by Gradle runs and te
 | Variable           | Default                       | Meaning                                                |
 |--------------------|-------------------------------|--------------------------------------------------------|
 | `PORT`             | `50051`                       | gRPC port                                               |
-| `SWE_LIB`          | required (`swe.lib`)          | Path to `libswe.so` / `libswe.dylib`                    |
-| `SWE_EPHE`         | required (`swe.ephe`)         | Directory with the `.se1` files                         |
+| `SWE_LIB`          | archive's `native/libswe.so` (`swe.lib`) | Path to `libswe.so` / `libswe.dylib`         |
+| `SWE_EPHE`         | archive's `ephe/` (`swe.ephe`) | Directory with the `.se1` files                        |
 | `SWE_THREADS`      | CPU count (1 on macOS)        | libswe worker threads                                   |
 | `SWE_QUEUE`        | `256`                         | Requests waiting for a worker; more get `RESOURCE_EXHAUSTED` |
 | `MAX_ITEMS`        | `10000`                       | Limit per request: instants × bodies, queries, results  |

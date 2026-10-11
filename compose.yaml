@@ -1,0 +1,55 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Example: run the latest release and try it.
+#
+#   docker compose up -d                        # builds from the latest release; healthy after the self-check
+#   docker compose run --rm grpcurl             # call GetInfo from a client container
+#   docker compose down
+#
+# Every `up` re-checks the latest GitHub release (pull_policy: build) and rebuilds only when it changed.
+# Pin a release with RELEASE=download/v0.1.0 in the environment or in an .env file next to this file.
+# Build from this checkout's sources instead: docker compose -f compose.yaml -f compose.source.yaml up -d --build
+#
+# Every setting below is optional; the values shown are the defaults unless noted. TLS, public addresses and
+# scaling belong to your own deployment.
+
+services:
+  ephemeris:
+    build:
+      context: .
+      args:
+        RELEASE: ${RELEASE:-latest/download}
+    pull_policy: build
+    image: swiss-ephemeris-service:release
+    ports:
+      - "50051:50051"                       # drop this when only other containers on the network call it
+    environment:
+      SWE_THREADS: "2"                      # default: CPU count; match it to the CPU limit below
+      SWE_QUEUE: "256"
+      MAX_ITEMS: "10000"
+      MAX_STREAM_ITEMS: "1000000"
+      CACHE_MAX_MB: "64"                    # 0 disables the in-process cache of search results
+      SEARCH_WITHOUT_SPEED: "true"
+      # SOURCE_URL: https://example.org/your-fork   # set it if you run a modified version (AGPL section 13)
+    read_only: true
+    tmpfs:
+      - /tmp:exec,size=64m                  # exec: netty loads its native epoll transport from /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 512M
+    restart: unless-stopped
+
+  # A client on the same network: other services reach the API at ephemeris:50051.
+  grpcurl:
+    image: fullstorydev/grpcurl:v1.9.1
+    profiles: ["tools"]
+    depends_on:
+      ephemeris:
+        condition: service_healthy
+    command: ["-plaintext", "ephemeris:50051", "me.lagna.ephemeris.v1.Ephemeris/GetInfo"]

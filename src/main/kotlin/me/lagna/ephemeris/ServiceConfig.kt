@@ -2,6 +2,7 @@
 package me.lagna.ephemeris
 
 import me.lagna.ephemeris.swe.SweThreads
+import java.nio.file.Files
 import java.nio.file.Path
 import java.time.Instant
 
@@ -11,8 +12,8 @@ import java.time.Instant
  * | Variable           | Property     | Default                                              |
  * |--------------------|--------------|------------------------------------------------------|
  * | `PORT`             | `port`       | 50051                                                |
- * | `SWE_LIB`          | `swe.lib`    | required                                             |
- * | `SWE_EPHE`         | `swe.ephe`   | required                                             |
+ * | `SWE_LIB`          | `swe.lib`    | `native/libswe.so` of a release archive              |
+ * | `SWE_EPHE`         | `swe.ephe`   | `ephe/` of a release archive                         |
  * | `SWE_THREADS`      | `swe.threads`| CPU count (1 on macOS)                               |
  * | `SWE_QUEUE`        | `swe.queue`  | 256 requests waiting for a worker; more get RESOURCE_EXHAUSTED |
  * | `MAX_ITEMS`        | `max.items`  | 10000: instants x bodies, queries, search results    |
@@ -49,6 +50,19 @@ data class ServiceConfig(
         const val DEFAULT_SOURCE_URL = "https://github.com/drnetua/swiss-ephemeris-service"
         private const val MB = 1024L * 1024L
 
+        /**
+         * A file inside the release archive this jar came from (`<home>/lib/<jar>`), or null when running from
+         * classes or the file is not there.
+         */
+        private fun bundled(relative: String): String? {
+            val jar =
+                runCatching { Path.of(ServiceConfig::class.java.protectionDomain.codeSource.location.toURI()) }
+                    .getOrNull() ?: return null
+            if (!Files.isRegularFile(jar)) return null
+            val candidate = jar.parent?.parent?.resolve(relative) ?: return null
+            return if (Files.exists(candidate)) candidate.toString() else null
+        }
+
         private fun parseBoolean(value: String): Boolean =
             when (value.trim().lowercase()) {
                 "true", "1", "yes", "on" -> true
@@ -69,8 +83,8 @@ data class ServiceConfig(
 
             return ServiceConfig(
                 port = setting("PORT", "port")?.toInt() ?: DEFAULT_PORT,
-                library = Path.of(required("SWE_LIB", "swe.lib")),
-                ephemeris = Path.of(required("SWE_EPHE", "swe.ephe")),
+                library = Path.of(setting("SWE_LIB", "swe.lib") ?: bundled("native/libswe.so") ?: required("SWE_LIB", "swe.lib")),
+                ephemeris = Path.of(setting("SWE_EPHE", "swe.ephe") ?: bundled("ephe") ?: required("SWE_EPHE", "swe.ephe")),
                 threads = setting("SWE_THREADS", "swe.threads")?.toInt() ?: SweThreads.defaultSize(),
                 queueCapacity = setting("SWE_QUEUE", "swe.queue")?.toInt() ?: SweThreads.DEFAULT_QUEUE_CAPACITY,
                 limits =

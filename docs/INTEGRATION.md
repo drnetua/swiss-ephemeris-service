@@ -61,7 +61,7 @@ Most integration bugs come from time zones and sign conventions, so read this se
 
 ## RPC reference
 
-All RPCs are unary except `StreamPositions`, and all are idempotent. Examples are grpcurl JSON (lowerCamel field names, enum names as strings); the same fields exist in every generated client.
+All RPCs are unary except `StreamPositions`, and all are idempotent. Examples are grpcurl request JSON (lowerCamel field names, enum names as strings; grpcurl prints responses with the proto's snake_case names); the same fields exist in every generated client.
 
 | RPC | Use it for | Cached by the server |
 | --- | --- | --- |
@@ -133,7 +133,7 @@ Returns every station in the range, in time order: the instant, the longitude an
 
 ### GetInfo
 
-Takes an empty request and returns `engineVersion`, `supportedFrom`, `supportedTo`, `maxItemsPerRequest`, `maxStreamItems` and `sourceUrl`. Read the range and limit from here instead of hard-coding them.
+Takes an empty request and returns `engineVersion`, `supportedFrom`, `supportedTo`, `maxItemsPerRequest`, `maxStreamItems`, `sourceUrl` and `serviceVersion` (the running release; local builds report their build version or `dev`). Read the range and limit from here instead of hard-coding them.
 
 ## Errors and limits
 
